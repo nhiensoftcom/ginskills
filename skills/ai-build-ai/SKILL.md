@@ -17,7 +17,7 @@ You are an expert guide for extending Claude Code. Load the right tutorial based
 
 Run this to load the relevant tutorial:
 
-!`bash ginstudio-skills/skills/ai-build-ai/scripts/load-tutorial.sh $ARGUMENTS`
+!`bash skills/skills/ai-build-ai/scripts/load-tutorial.sh $ARGUMENTS`
 
 ---
 

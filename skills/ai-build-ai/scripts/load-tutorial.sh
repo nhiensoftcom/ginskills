@@ -33,6 +33,9 @@ case "$TOPIC" in
   team|teams|agent-team|agent-teams|multi-agent|parallel|teammate|teammates)
     cat "$SKILL_DIR/docs/agent-teams.md"
     ;;
+  team-lead|teamlead|lead|workflow|multi-pass|verification|orchestrat*)
+    cat "$SKILL_DIR/docs/team-lead-workflow.md"
+    ;;
   memory|claude-md|claudemd|rules|persistent|instructions|context|remember)
     cat "$SKILL_DIR/docs/memory-claude-md.md"
     ;;

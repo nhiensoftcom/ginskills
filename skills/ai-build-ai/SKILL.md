@@ -2,10 +2,10 @@
 name: ai-build-ai
 description: |
   **AI Build AI**: Master guide for extending Claude Code — creating skills, custom subagents (agents), MCP servers, hooks, plugins, agent teams, running Claude programmatically, and more.
-  - MANDATORY TRIGGERS: create skill, new skill, add skill, write skill, build skill, create agent, new agent, add subagent, custom agent, create MCP, add MCP server, connect MCP, build MCP, headless mode, agent SDK, run claude programmatically, claude -p, how to extend claude, claude extensibility, how to create, how to build, hooks, plugin, agent team, sandbox, checkpoint, rewind, output style
+  - MANDATORY TRIGGERS: create skill, new skill, add skill, write skill, build skill, create agent, new agent, add subagent, custom agent, create MCP, add MCP server, connect MCP, build MCP, headless mode, agent SDK, run claude programmatically, claude -p, how to extend claude, claude extensibility, how to create, how to build, hooks, plugin, agent team, team lead, multi-agent, multi-pass, verification workflow, orchestrate agents, sandbox, checkpoint, rewind, output style
   - Use this skill when the user wants to: create or design a new Claude Code skill, build a custom subagent/agent, connect an MCP server or build their own, run Claude programmatically via CLI or SDK, configure hooks, build a plugin, set up agent teams, configure sandboxing, use checkpointing, or change output styles.
   - Invoke the correct tutorial based on the topic argument.
-argument-hint: "[skill | agent | mcp | headless | hooks | plugins | teams | memory | permissions | sandbox | checkpoint | output-styles]"
+argument-hint: "[skill | agent | mcp | headless | hooks | plugins | teams | team-lead | memory | permissions | sandbox | checkpoint | output-styles]"
 disable-model-invocation: false
 ---
 
@@ -48,6 +48,7 @@ After reading the tutorial above, help the user build their extension by:
 | Auto-format files, block dangerous commands, send notifications | **Hooks** |
 | Distribute extensions to a team or community | **Plugin** |
 | Parallel work where teammates need to communicate | **Agent Teams** |
+| Orchestrate multi-agent workflow with quality gates and multi-pass review | **Team Lead** (`/ai-build-ai team-lead`) |
 | Persist coding standards across sessions | **CLAUDE.md / Memory** |
 | Restrict what files/commands Claude can touch | **Permissions** |
 | Add OS-level protection for bash commands | **Sandbox** |
@@ -69,12 +70,13 @@ The user can invoke with a specific topic to load the deep tutorial immediately:
 | `/ai-build-ai hooks` | All hook events, types, exit codes, matchers, notification matchers, recipes |
 | `/ai-build-ai plugins` | Plugin manifest, structure, skills/agents/hooks/MCP in plugins, distribution |
 | `/ai-build-ai teams` | Agent teams: enable, start, control, display modes, use cases |
+| `/ai-build-ai team-lead` | Team lead workflow: multi-agent orchestration, multi-pass verification, quality gates |
 | `/ai-build-ai memory` | CLAUDE.md, .claude/rules/, auto memory, imports, monorepo setup |
 | `/ai-build-ai permissions` | Allow/deny rules, modes, Bash/Read/Edit/WebFetch/MCP/Agent rules |
 | `/ai-build-ai sandbox` | OS-level enforcement, filesystem rules, network filtering |
 | `/ai-build-ai checkpoint` | Rewind, fork, session management, summarize from here |
 | `/ai-build-ai output-styles` | Built-in styles, custom styles, keep-coding-instructions |
-| `/ai-build-ai` | Overview of all 12 extension types + decision table |
+| `/ai-build-ai` | Overview of all 13 extension types + decision table |
 
 ---
 
@@ -88,6 +90,7 @@ The user can invoke with a specific topic to load the deep tutorial immediately:
 - `docs/hooks.md` — All hook events, types, matchers, notification matchers, recipes
 - `docs/plugins.md` — Plugin manifest, structure, distribution
 - `docs/agent-teams.md` — Team architecture, display modes, use cases
+- `docs/team-lead-workflow.md` — Team lead orchestration, multi-pass verification, specialist definitions
 - `docs/memory-claude-md.md` — CLAUDE.md, rules/, auto memory, imports
 - `docs/permissions.md` — Permission modes, rule syntax, examples
 - `docs/sandbox.md` — OS-level sandboxing, filesystem and network rules

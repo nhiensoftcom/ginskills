@@ -118,6 +118,7 @@ After installing, **restart Claude Code** (or type `/agents`) to pick up the new
 | `react-query` | TanStack React Query v5+ best practices |
 | `review-code` | Comprehensive code review for fullstack monorepos |
 | `security-scanner` | OWASP-aligned security audit (Top 10, LLM, Mobile) |
+| `react-native-expo` | React Native Expo best practices for Sty AI mobile (navigation, state, design system, performance) |
 | `ui-ux-pro-max` | Design intelligence with 67 styles, palettes, typography |
 
 ## Available Agents

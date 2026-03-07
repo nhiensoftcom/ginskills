@@ -12,7 +12,8 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "gen-readme": "node scripts/gen-readme.mjs"
+    "gen-readme": "node scripts/gen-readme.mjs",
+    "prepublishOnly": "node scripts/gen-readme.mjs"
   },
   "bin": {
     "ginskill-init": "bin/cli.js"

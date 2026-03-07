@@ -114,6 +114,62 @@ v5 enables dynamic sizing by default. Disable for fixed snap points or limit hei
 <BottomSheet enableDynamicSizing maxDynamicContentSize={500} />
 ```
 
+### ⚠️ CRITICAL: Dynamic Sizing + Scrollable Content
+
+**NEVER** use `enableDynamicSizing={true}` with `BottomSheetScrollView` or `BottomSheetFlashList`.
+Dynamic sizing measures children's intrinsic height via `BottomSheetView`, but scrollable content
+has no fixed intrinsic height → sheet appears truncated (header-only).
+
+```typescript
+// ❌ WRONG — sheet will appear truncated, only showing header
+<BottomSheetWrapper ref={ref} name="my-sheet">
+  <BottomSheetScrollView>{/* list content */}</BottomSheetScrollView>
+</BottomSheetWrapper>
+
+// ✅ CORRECT — disable dynamic sizing, use explicit snap points
+const snapPoints = useMemo(() => ["50%"], [])
+
+<BottomSheetWrapper ref={ref} name="my-sheet" enableDynamicSizing={false} snapPoints={snapPoints}>
+  <BottomSheetScrollView>{/* list content */}</BottomSheetScrollView>
+</BottomSheetWrapper>
+```
+
+The app's `BottomSheetWrapper` defaults to `enableDynamicSizing={true}`. Always override when content is scrollable.
+
+### BottomSheetWrapper (App Component)
+
+Located at `@/shared/components/bottom-sheet`. Wraps `@gorhom/bottom-sheet` BottomSheetModal with:
+- Auto safe-area bottom padding
+- Header component (title + close button + drag handle)
+- Backdrop with 0.5 opacity
+- Patched `present()` that always cleans up first (no stuck states)
+
+```typescript
+import { BottomSheetModal } from "@gorhom/bottom-sheet"
+import { BottomSheetWrapper } from "@/shared/components/bottom-sheet"
+
+const ref = useRef<BottomSheetModal>(null)
+const snapPoints = useMemo(() => ["50%"], [])
+
+<BottomSheetWrapper
+  ref={ref}
+  name="my-sheet"
+  enableDynamicSizing={false}
+  snapPoints={snapPoints}
+  header={{
+    title: "Sheet Title",
+    showCloseButton: true,
+    closeButtonText: "Cancel",
+  }}
+  onDismiss={() => setSheetOpen(false)}
+>
+  {/* Content */}
+</BottomSheetWrapper>
+
+// Open: ref.current?.present()
+// Close: ref.current?.dismiss()
+```
+
 ## Shared Components
 
 ### Typography

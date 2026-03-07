@@ -2,6 +2,11 @@
   "name": "ginskill-init",
   "version": "2.5.5",
   "description": "Install GinStudio skills and agents for Claude Code",
+  "homepage": "https://skills.ginstudio.asia",
+  "repository": {
+    "type": "git",
+    "url": "git+https://gitlab.com/ginstudio/skills.git"
+  },
   "keywords": [
     "claude-code",
     "claude",

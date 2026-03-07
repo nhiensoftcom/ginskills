@@ -547,6 +547,63 @@
     }
     .cta-install-cmd:hover .copy-indicator { color: var(--text-secondary); }
 
+    /* ─── Open Source Credits ─── */
+    .oss-credits {
+      padding: 64px 0;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .oss-credits-header {
+      text-align: center; margin-bottom: 40px;
+    }
+    .oss-credits-header h2 {
+      font-size: clamp(24px, 3vw, 30px); font-weight: 700; margin-bottom: 8px;
+    }
+    .oss-credits-header p {
+      font-size: 15px; color: var(--text-secondary); max-width: 500px; margin: 0 auto;
+    }
+    .oss-credit-card {
+      display: flex; align-items: flex-start; gap: 24px;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 32px;
+      max-width: 680px; margin: 0 auto;
+      transition: border-color var(--transition), box-shadow var(--transition);
+    }
+    .oss-credit-card:hover {
+      border-color: var(--purple);
+      box-shadow: 0 4px 24px rgba(124, 58, 237, 0.06);
+    }
+    .oss-credit-icon {
+      flex-shrink: 0; width: 56px; height: 56px;
+      background: var(--purple-dim); border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 24px; font-weight: 700; color: var(--purple);
+      font-family: var(--font-mono);
+    }
+    .oss-credit-body { flex: 1; min-width: 0; }
+    .oss-credit-body h3 {
+      font-size: 18px; font-weight: 700; margin-bottom: 4px;
+    }
+    .oss-credit-body h3 a { color: var(--purple); }
+    .oss-credit-body h3 a:hover { color: #6D28D9; }
+    .oss-credit-author {
+      font-size: 13px; color: var(--text-muted); margin-bottom: 10px;
+    }
+    .oss-credit-author a { color: var(--text-secondary); }
+    .oss-credit-author a:hover { color: var(--text-primary); }
+    .oss-credit-desc {
+      font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 14px;
+    }
+    .oss-credit-stats {
+      display: flex; gap: 16px; flex-wrap: wrap;
+    }
+    .oss-credit-stat {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 12px; color: var(--text-muted);
+      background: var(--bg-primary); border-radius: 6px; padding: 4px 10px;
+      font-family: var(--font-mono);
+    }
+    .oss-credit-stat strong { color: var(--text-secondary); font-weight: 600; }
+
     /* ─── Footer ─── */
     .footer {
       border-top: 1px solid var(--border-subtle);
@@ -1132,6 +1189,33 @@
     </div>
   </section>
 
+  <!-- Open Source Credits -->
+  <section class="oss-credits" id="credits">
+    <div class="container">
+      <div class="oss-credits-header fade-up">
+        <h2>Built on Open Source</h2>
+        <p>GinStudio Skills includes community-driven skills. Credit to the original authors.</p>
+      </div>
+      <div class="oss-credit-card fade-up">
+        <div class="oss-credit-icon">U</div>
+        <div class="oss-credit-body">
+          <h3><a href="https://github.com/nextlevelbuilder/ui-ux-pro-max-skill" target="_blank" rel="noopener">ui-ux-pro-max</a></h3>
+          <div class="oss-credit-author">by <a href="https://github.com/nextlevelbuilder" target="_blank" rel="noopener">Next Level Builder</a> &middot; MIT License</div>
+          <div class="oss-credit-desc">
+            AI-powered design intelligence with 67 UI styles, 96 color palettes, 57 font pairings, and 100 industry-specific reasoning rules. Supports 13 tech stacks including React, Next.js, Vue, SwiftUI, Flutter, and more.
+          </div>
+          <div class="oss-credit-stats">
+            <span class="oss-credit-stat"><strong>67</strong> Styles</span>
+            <span class="oss-credit-stat"><strong>96</strong> Palettes</span>
+            <span class="oss-credit-stat"><strong>57</strong> Fonts</span>
+            <span class="oss-credit-stat"><strong>13</strong> Stacks</span>
+            <span class="oss-credit-stat"><strong>38k</strong> Stars</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- Footer -->
   <footer class="footer">
     <div class="container">
@@ -1139,12 +1223,14 @@
         <div class="footer-brand">GinStudio Skills v2.5.5</div>
         <div class="footer-links">
           <a href="https://www.npmjs.com/package/ginskill-init" target="_blank" rel="noopener">npm</a>
+          <a href="https://gitlab.com/ginstudio/skills" target="_blank" rel="noopener">GitLab</a>
           <a href="#features">Features</a>
           <a href="#skills">Skills</a>
           <a href="#agents">Agents</a>
+          <a href="#credits">Credits</a>
           <a href="#cli">CLI Docs</a>
         </div>
-        <div class="footer-copy">MIT License &middot; UI/UX skill based on <a href="https://github.com/nextlevelbuilder/ui-ux-pro-max-skill" target="_blank" rel="noopener">ui-ux-pro-max</a> by <a href="https://github.com/nextlevelbuilder" target="_blank" rel="noopener">Next Level Builder</a></div>
+        <div class="footer-copy">MIT License &middot; <a href="https://github.com/nextlevelbuilder/ui-ux-pro-max-skill" target="_blank" rel="noopener">ui-ux-pro-max</a> by <a href="https://github.com/nextlevelbuilder" target="_blank" rel="noopener">Next Level Builder</a> &middot; skills.ginstudio.asia</div>
       </div>
     </div>
   </footer>

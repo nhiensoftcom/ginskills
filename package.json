@@ -1,0 +1,37 @@
+{
+  "name": "gin-skills",
+  "version": "1.0.0",
+  "description": "Install GinStudio skills and agents for Claude Code",
+  "homepage": "https://skills.ginstudio.asia",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vuduynhiennn/ginskills.git"
+  },
+  "keywords": [
+    "claude-code",
+    "claude",
+    "skills",
+    "agents",
+    "ai"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "gen-readme": "node scripts/gen-readme.mjs",
+    "check-upstream": "node scripts/check-upstream.mjs",
+    "deploy": "npx wrangler pages deploy landing --project-name ginskill --branch main",
+    "prepublishOnly": "node scripts/gen-readme.mjs"
+  },
+  "bin": {
+    "gin-skills": "bin/cli.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "ora": "^8.1.1",
+    "prompts": "^2.4.2"
+  }
+}

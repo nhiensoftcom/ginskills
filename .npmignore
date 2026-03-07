@@ -1,0 +1,26 @@
+# Large media files not needed for CLI usage
+**/screenshots/
+**/evals/
+**/*.mov
+**/*.mp4
+**/*.avi
+**/*.webm
+
+# Dev / local files
+scripts/
+install.py
+install.js
+*.local.json
+.gitignore
+
+# Dependencies (not needed in published package)
+node_modules/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+*.swp
+**/.env*
+
+# Wrangler cache
+.wrangler/

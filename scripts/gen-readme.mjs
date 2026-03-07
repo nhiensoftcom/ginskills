@@ -152,7 +152,7 @@ function updateReadme(skills, agents) {
   // Replace "## Available Agents" section
   const agentsTable = `## Available Agents\n\n| Agent | Description |\n|-------|-------------|\n${generateTable(agents)}`
   readme = readme.replace(
-    /## Available Agents\n[\s\S]*?(?=\n---)/,
+    /## Available Agents\n[\s\S]*?(?=\n## )/,
     agentsTable + "\n\n",
   )
 

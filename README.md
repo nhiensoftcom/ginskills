@@ -10,97 +10,28 @@ npx ginskill-init
 
 Interactive TUI — use **Space** to select, **A** to toggle all, **Enter** to confirm.
 
----
-
 ## Installation
 
-### Install to current project
-
 ```bash
-npx ginskill-init
+npx ginskill-init                                 # Interactive (current project)
+npx ginskill-init -g                               # Global (~/.claude/)
+npx ginskill-init -t /path/to/project              # Specific project
+npx ginskill-init --all                            # Install everything
+npx ginskill-init --skills react-query,mongodb     # Specific skills only
+npx ginskill-init --agents developer,tester        # Specific agents only
 ```
-
-### Install to a specific project
-
-```bash
-npx ginskill-init -t /path/to/project
-```
-
-### Install globally (available in all projects)
-
-```bash
-npx ginskill-init -g
-```
-
-### Non-interactive (CI / scripts)
-
-```bash
-npx ginskill-init --all                          # Install everything
-npx ginskill-init --skills react-query,mongodb   # Specific skills
-npx ginskill-init --agents developer,tester      # Specific agents
-npx ginskill-init --all -g                       # Everything, globally
-```
-
----
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `ginskill-init` | Interactive install (default) |
-| `ginskill-init upgrade` | Re-install installed skills/agents from latest bundled version |
-| `ginskill-init uninstall` | Remove installed skills/agents |
-| `ginskill-init status` | Show what's installed vs available |
-| `ginskill-init list` | List all available skills & agents |
-| `ginskill-init versions` | Show all published npm versions |
-
-### Flags (work on all commands)
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--global` | `-g` | Target `~/.claude/` (available in all projects) |
-| `--target <path>` | `-t` | Target a specific project path |
-| `--all` | `-a` | Skip prompts, select all |
-
-### Examples
-
 ```bash
-# Check what's installed in current project
-ginskill-init status
-
-# Check a specific project
-ginskill-init status -t /path/to/project
-
-# Upgrade all installed skills to latest version
-npx ginskill-init@latest upgrade --all
-
-# Uninstall interactively
-ginskill-init uninstall
-
-# Remove from a specific project
-ginskill-init uninstall -t /path/to/project
+ginskill-init                    # Interactive install (default)
+ginskill-init upgrade --all      # Upgrade to latest version
+ginskill-init uninstall          # Remove skills/agents
+ginskill-init status             # Show installed vs available
+ginskill-init list               # List all bundled skills & agents
 ```
 
----
-
-## Where files are installed
-
-```
-<project>/
-  .claude/
-    skills/
-      react-query/SKILL.md
-      mongodb/SKILL.md
-      ...
-    agents/
-      developer.md
-      tester.md
-      ...
-```
-
-After installing, **restart Claude Code** (or type `/agents`) to pick up the new skills and agents.
-
----
+**Flags:** `-g` global, `-t <path>` target project, `--all` skip prompts
 
 ## Available Skills
 
@@ -134,11 +65,6 @@ After installing, **restart Claude Code** (or type `/agents`) to pick up the new
 | `tester` | Testing agent for writing and running unit tests, integration tests, and e2e tests |
 
 
----
-
 ## Contributing
 
-See [DEVELOPMENT.md](./DEVELOPMENT.md) for:
-- How to add a new skill or agent
-- How to release a new version to npm
-- CLI development and testing guide
+See [DEVELOPMENT.md](./DEVELOPMENT.md) for how to add skills/agents and release new versions.

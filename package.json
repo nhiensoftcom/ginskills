@@ -14,6 +14,7 @@
   "scripts": {
     "gen-readme": "node scripts/gen-readme.mjs",
     "check-upstream": "node scripts/check-upstream.mjs",
+    "deploy": "npx wrangler pages deploy landing --project-name ginskill --branch main",
     "prepublishOnly": "node scripts/check-upstream.mjs && node scripts/gen-readme.mjs"
   },
   "bin": {

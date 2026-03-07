@@ -465,7 +465,7 @@ check_patterns() {
     fi
 
     # Check for string concatenation in template-capable code
-    grep -n '+ *["\x27].*["\x27] *+\|["\x27].*["\x27] *+ *[a-zA-Z]' "$file" 2>/dev/null | \
+    grep -n -E '\+ *["'"'"'].*["'"'"'] *\+|["'"'"'].*["'"'"'] *\+ *[a-zA-Z]' "$file" 2>/dev/null | \
       grep -v "import\|require\|//\|console\.\|\.spec\.\|\.test\." | \
       head -3 | while IFS=: read -r line content; do
         add_finding "patterns" "info" "string_concat" "$file" "$line" \

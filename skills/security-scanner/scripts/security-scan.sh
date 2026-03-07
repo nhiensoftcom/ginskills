@@ -22,6 +22,7 @@
 #   ./security-scan.sh mobile         # mobile only
 #   ./security-scan.sh supply-chain   # supply chain only
 #   ./security-scan.sh llm            # LLM/AI security only
+#   ./security-scan.sh secrets        # comprehensive credential scan (100+ patterns)
 #
 # Environment variables (override auto-detection):
 #   BE_DIR=./my-backend  FE_DIR=./my-frontend  MOBILE_DIR=./my-mobile  ./security-scan.sh all
@@ -33,6 +34,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$SCRIPT_DIR/../../../../.." && pwd)"
+
+# Source the comprehensive patterns database
+if [ -f "$SCRIPT_DIR/secret-patterns.sh" ]; then
+  source "$SCRIPT_DIR/secret-patterns.sh"
+  PATTERNS_LOADED=true
+else
+  PATTERNS_LOADED=false
+fi
 
 # ─── Auto-detect project directories ─────────────────────────
 detect_dir() {
@@ -102,7 +111,107 @@ scan_hardcoded_secrets() {
   local dir="$1" label="$2"
   log "Scanning $label for hardcoded secrets..."
 
-  # API keys / tokens / passwords in source
+  if [ "$PATTERNS_LOADED" = true ]; then
+    # ─── Pass 1: Direct pattern matching (SECRET_PATTERNS) ───
+    _scan_with_patterns "$dir" "$label" "SECRET_PATTERNS"
+
+    # ─── Pass 2: Contextual pattern matching (CONTEXTUAL_PATTERNS) ───
+    _scan_with_patterns "$dir" "$label" "CONTEXTUAL_PATTERNS"
+
+    # ─── Pass 3: Sensitive files check ───
+    _scan_sensitive_files "$dir" "$label"
+  else
+    # Fallback: basic patterns if patterns database not available
+    _scan_basic_secrets "$dir" "$label"
+  fi
+}
+
+_is_false_positive() {
+  local line="$1"
+  for fp in "${FALSE_POSITIVE_PATTERNS[@]}"; do
+    if echo "$line" | grep -qiF -- "$fp" 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+_build_include_flags() {
+  local flags=""
+  for ext in ts tsx js jsx mjs cjs json yaml yml env sh; do
+    flags="$flags --include=*.$ext"
+  done
+  echo "$flags"
+}
+
+_scan_with_patterns() {
+  local dir="$1" label="$2" array_name="$3"
+  local -n patterns_ref="$array_name"
+  local include_flags
+  include_flags="$(_build_include_flags)"
+
+  for pattern_entry in "${patterns_ref[@]}"; do
+    IFS='|' read -r sev cat name regex desc <<< "$pattern_entry"
+    [ -z "$regex" ] && continue
+
+    while IFS=: read -r file line content; do
+      [ -z "$file" ] && continue
+      # Skip excluded paths
+      local skip=false
+      for excl in "${EXCLUDE_PATHS[@]}"; do
+        if echo "$file" | grep -qE "$excl" 2>/dev/null; then
+          skip=true
+          break
+        fi
+      done
+      [ "$skip" = true ] && continue
+
+      # Skip false positives
+      if _is_false_positive "$content"; then
+        continue
+      fi
+
+      finding "$sev" "$name" "${file#$REPO_ROOT/}:$line" "$desc"
+    done < <(grep -rn -E -- "$regex" \
+      --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" \
+      --include="*.mjs" --include="*.cjs" --include="*.json" --include="*.yaml" \
+      --include="*.yml" --include="*.env" --include="*.sh" --include="*.py" \
+      "$dir" 2>/dev/null | grep -v "node_modules" | head -30 || true)
+  done
+}
+
+_scan_sensitive_files() {
+  local dir="$1" label="$2"
+  log "Checking $label for sensitive files..."
+
+  # Private key files
+  while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    finding "CRITICAL" "SENSITIVE_FILE" "${file#$REPO_ROOT/}" "Private key file found in source tree"
+  done < <(find "$dir" \( -name "*.pem" -o -name "*.key" -o -name "*.p12" -o -name "*.pfx" -o -name "*.jks" \) 2>/dev/null | grep -v "node_modules" | head -10 || true)
+
+  # Credential files
+  while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    finding "CRITICAL" "CREDENTIAL_FILE" "${file#$REPO_ROOT/}" "Credential file found in source tree"
+  done < <(find "$dir" \( -name "credentials.json" -o -name "service-account*.json" -o -name "keyfile.json" -o -name ".npmrc" \) 2>/dev/null | grep -v "node_modules" | head -10 || true)
+
+  # .env files that shouldn't be committed
+  while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    local basename
+    basename=$(basename "$file")
+    # Skip .env.example, .env.sample, .env.template
+    case "$basename" in
+      .env.example|.env.sample|.env.template) continue ;;
+    esac
+    finding "CRITICAL" "ENV_FILE_COMMITTED" "${file#$REPO_ROOT/}" ".env file found in source (should be in .gitignore)"
+  done < <(find "$dir" -maxdepth 3 -name ".env" -o -name ".env.local" -o -name ".env.production" -o -name ".env.staging" 2>/dev/null | grep -v "node_modules" | head -10 || true)
+}
+
+_scan_basic_secrets() {
+  local dir="$1" label="$2"
+  # Fallback basic scan when patterns database not loaded
   while IFS=: read -r file line content; do
     [ -z "$file" ] && continue
     finding "CRITICAL" "HARDCODED_SECRET" "${file#$REPO_ROOT/}:$line" "Possible hardcoded secret"
@@ -425,6 +534,19 @@ if [[ "$TARGET" == "llm" || "$TARGET" == "all" ]]; then
     scan_llm_security "$BE_SRC"
   else
     log "[skip] No backend source directory for LLM scan"
+  fi
+fi
+
+if [[ "$TARGET" == "secrets" ]]; then
+  log ""
+  log "═══ Comprehensive Credential Scan (100+ patterns) ═══"
+  if [ -x "$SCRIPT_DIR/credential-scanner.sh" ]; then
+    "$SCRIPT_DIR/credential-scanner.sh" "$REPO_ROOT" --format text --severity all
+  else
+    log "Running inline credential scan..."
+    [ -n "$BE_SRC" ] && scan_hardcoded_secrets "$BE_SRC" "backend"
+    [ -n "$FE_SRC" ] && scan_hardcoded_secrets "$FE_SRC" "frontend"
+    [ -n "$MOBILE_SRC" ] && [ -d "$MOBILE_SRC" ] && scan_hardcoded_secrets "$MOBILE_SRC" "mobile"
   fi
 fi
 

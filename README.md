@@ -73,6 +73,7 @@ ginskill-init versions   # Show all published npm versions
 | `ai-asset-generator` | `--skills ai-asset-generator` | AI Asset Generator: Generate production-ready images, icons, videos, and visual assets using KIE AI and background removal APIs. |
 | `ai-build-ai` | `--skills ai-build-ai` | AI Build AI: Master guide for extending Claude Code — creating skills, custom subagents (agents), MCP servers, hooks, plugins, agent teams, running... |
 | `ant-design` | `--skills ant-design` | Ant Design (antd) Expert: Production patterns for building React UIs with Ant Design v5/v6 — components, theming, Form, Table, Modal, layout, icons... |
+| `flutter-performance` | `--skills flutter-performance` | Flutter Performance Optimization: Comprehensive guide for optimizing Flutter app performance — widget rebuilds, jank reduction, memory leaks, Dart ... |
 | `icon-generator` | `--skills icon-generator` | SVG Icon Generator: Generate beautiful, clean SVG icon components (.tsx) for React Native apps using react-native-svg. |
 | `mobile-app-review` | `--skills mobile-app-review` | Mobile App Store Review Checklist: Comprehensive pre-submission audit for Apple App Store and Google Play Store. |
 | `mongodb` | `--skills mongodb` | MongoDB & Mongoose Best Practices: Production patterns for schema design, indexing, aggregation pipelines, transactions, connection management, and... |

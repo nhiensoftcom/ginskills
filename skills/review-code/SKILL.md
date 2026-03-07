@@ -309,6 +309,59 @@ Detects config drift, import ordering violations, file naming issues, and incons
 - **Naming:** camelCase files, PascalCase non-components, special characters, mixed test conventions (.spec vs .test)
 - **Patterns:** mixed export styles, mixed async patterns (.then vs await), console.log over logger, string concatenation over templates
 
+### `scripts/standards-check.sh` — Coding Standards Checker
+Detects constant naming violations, TypeScript typing issues, error handling gaps, React/React Native anti-patterns, and general conventions. Pure bash — no npm deps.
+```bash
+./scripts/standards-check.sh                          # scan all projects
+./scripts/standards-check.sh backend                  # scan backend only
+./scripts/standards-check.sh --category constants     # only constant naming
+./scripts/standards-check.sh --category typing        # only TS typing issues
+./scripts/standards-check.sh --category error_handling # only error handling
+./scripts/standards-check.sh --category react_standards # only React rules
+./scripts/standards-check.sh --category conventions   # only conventions
+./scripts/standards-check.sh --severity critical      # only critical issues
+./scripts/standards-check.sh --summary                # summary counts only
+```
+
+**Categories & rules detected:**
+- **Constants:** `const` primitives not UPPER_SNAKE_CASE, enum values not UPPER_SNAKE/PascalCase, hardcoded numeric constants in conditions
+- **Typing:** explicit `: any` annotations, type assertion chains (`as unknown as X`), excessive non-null assertions (`!.`), missing return type on exports, NestJS constructor params without `readonly`
+- **Error handling:** `throw "string"` instead of `throw new Error()`, `.then()` without `.catch()`, async without try-catch, `reject()` without Error object
+- **React standards:** inline `style={{}}` objects, `React.forwardRef`/`memo` without displayName, index-as-key, nested ternary in JSX, large inline functions in JSX props
+- **Conventions:** inconsistent import quotes, directories without barrel exports (index.ts), files with >10 exports (god module), switch without default, nested ternary operators, method chains >5 dots
+
+**Exit codes:** 0 = clean, 1 = warnings found, 2 = critical issues found
+
+### `scripts/anti-patterns.sh` — Advanced Anti-Pattern Detector
+Detects complexity anti-patterns, duplication issues, async/promise mistakes, architecture smells, and maintainability problems. Pure bash — no npm deps.
+```bash
+./scripts/anti-patterns.sh                            # scan all projects
+./scripts/anti-patterns.sh backend                    # scan backend only
+./scripts/anti-patterns.sh --category complexity      # only complexity issues
+./scripts/anti-patterns.sh --category duplication     # only duplication smells
+./scripts/anti-patterns.sh --category promise_patterns # only async/promise issues
+./scripts/anti-patterns.sh --category architecture    # only architecture smells
+./scripts/anti-patterns.sh --category maintainability # only maintainability issues
+./scripts/anti-patterns.sh --severity critical        # only critical issues
+./scripts/anti-patterns.sh --summary                  # summary counts only
+```
+
+**Categories & rules detected:**
+- **Complexity:** nested callbacks (callback hell), complex conditionals (>3 operators), switch with >10 cases, large object literals (>15 props), deeply nested destructuring
+- **Duplication:** duplicate conditions in if/else chains, duplicate switch case values, repeated magic strings (8+ chars, 3+ times per file), copy-paste code blocks (3+ identical consecutive lines)
+- **Promise patterns:** floating promises (no await/return), await-in-loop (should use Promise.all), Promise constructor anti-pattern, unnecessary async, mixed await/.then()
+- **Architecture:** circular imports (within same directory), feature envy (>4 accesses to same external object), god functions (>5 control flow statements), shotgun surgery indicators (same function in 5+ files), layer violations (frontend importing backend or vice versa)
+- **Maintainability:** large types/interfaces (>8 props), excessive comments (>40% of file), dead code indicators (unused exports), inconsistent error messages, deeply nested JSX (>8 levels)
+
+**Exit codes:** 0 = clean, 1 = warnings found, 2 = critical issues found
+
+### `scripts/test-standards.sh` — Test Runner for Standards Scanners
+Validates that deep-scan.sh and format-check.sh correctly detect their target patterns using synthetic TypeScript fixtures.
+```bash
+./scripts/test-standards.sh              # run all 27 tests
+./scripts/test-standards.sh --verbose    # show detailed output per test
+```
+
 ## References
 
 For deeper review of specific areas, read these files:

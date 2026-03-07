@@ -1,16 +1,37 @@
 #!/usr/bin/env node
 
 // Auto-generate the "Available Skills" and "Available Agents" sections in README.md
-// by reading frontmatter from each skill's SKILL.md and each agent's .md file.
+// AND update the landing page (landing/index.html) with the same data.
 //
 // Usage: node scripts/gen-readme.mjs
+// Runs automatically on: npm version (prepublishOnly)
 
-import { readFileSync, writeFileSync, readdirSync, statSync } from "fs"
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "fs"
 import { join, dirname } from "path"
 import { fileURLToPath } from "url"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, "..")
+
+// ─── Color rotation for skill cards ───
+const SKILL_COLORS = [
+  "var(--cyan)",
+  "var(--green)",
+  "var(--rose)",
+  "var(--purple)",
+  "var(--amber)",
+  "var(--blue)",
+]
+
+// ─── Color + icon config for agent cards ───
+const AGENT_STYLES = [
+  { color: "var(--green)", bg: "var(--green-glow)" },
+  { color: "var(--cyan)", bg: "var(--cyan-dim)" },
+  { color: "var(--purple)", bg: "var(--purple-dim)" },
+  { color: "var(--amber)", bg: "var(--amber-dim)" },
+  { color: "var(--rose)", bg: "var(--rose-dim)" },
+  { color: "var(--blue)", bg: "var(--blue-dim)" },
+]
 
 function parseFrontmatter(content) {
   const match = content.match(/^---\n([\s\S]*?)\n---/)
@@ -147,6 +168,7 @@ function generateAgentsTable(items) {
   return rows.join("\n")
 }
 
+// ─── README update ───
 function updateReadme(skills, agents) {
   const readmePath = join(ROOT, "README.md")
   let readme = readFileSync(readmePath, "utf-8")
@@ -166,10 +188,102 @@ function updateReadme(skills, agents) {
   )
 
   writeFileSync(readmePath, readme)
-  return { skillCount: skills.length, agentCount: agents.length }
 }
 
-// Run
+// ─── Landing page update ───
+function updateLanding(skills, agents) {
+  const landingPath = join(ROOT, "landing", "index.html")
+  if (!existsSync(landingPath)) {
+    console.log("  [skip] landing/index.html not found")
+    return
+  }
+
+  let html = readFileSync(landingPath, "utf-8")
+  const sc = skills.length
+  const ac = agents.length
+
+  // Read package.json for version
+  const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8"))
+  const ver = pkg.version
+  const verShort = ver.replace(/\.\d+$/, "") // e.g. "2.5.5" → "2.5"
+
+  // Helper: replace content between markers
+  function replaceMarker(src, marker, replacement) {
+    const re = new RegExp(
+      `(<!-- AUTO:${marker} -->)[\\s\\S]*?(<!-- /AUTO:${marker} -->)`,
+      "g",
+    )
+    return src.replace(re, `$1${replacement}$2`)
+  }
+  function replaceJsMarker(src, marker, replacement) {
+    const re = new RegExp(
+      `(/\\* AUTO:${marker} \\*/)[\\s\\S]*?(/\\* /AUTO:${marker} \\*/)`,
+      "g",
+    )
+    return src.replace(re, `$1\n${replacement}\n    $2`)
+  }
+
+  // 1. Badge: "v2.5 — 14 Skills · 6 Agents"
+  html = replaceMarker(html, "BADGE", `v${verShort} &mdash; ${sc} Skills &middot; ${ac} Agents`)
+
+  // 2. Stats bar
+  const statsHtml = `
+      <div class="stats-bar fade-up">
+        <div class="stat"><span class="stat-number">${sc}</span><span class="stat-label">Skills</span></div>
+        <div class="stat"><span class="stat-number">${ac}</span><span class="stat-label">Agents</span></div>
+        <div class="stat"><span class="stat-number">1</span><span class="stat-label">Command</span></div>
+        <div class="stat"><span class="stat-number">MIT</span><span class="stat-label">License</span></div>
+      </div>
+      `
+  html = replaceMarker(html, "STATS", statsHtml)
+
+  // 3. Section heading counts
+  html = replaceMarker(html, "SKILL_COUNT", String(sc))
+  html = replaceMarker(html, "AGENT_COUNT", String(ac))
+
+  // 4. Meta description counts
+  html = replaceMarker(html, "META_COUNTS", `${sc} skills, ${ac} agents`)
+
+  // 5. CTA counts
+  html = replaceMarker(html, "CTA_COUNTS", `${sc} skills. ${ac} agents.`)
+
+  // 6. Skills JS data array
+  const skillsJs = `    const SKILLS = [\n${skills
+    .map((s, i) => {
+      const color = SKILL_COLORS[i % SKILL_COLORS.length]
+      const desc = s.description.replace(/'/g, "\\'")
+      return `      { name: '${s.name}', desc: '${desc}', color: '${color}' },`
+    })
+    .join("\n")}\n    ];`
+  html = replaceJsMarker(html, "SKILLS_DATA", skillsJs)
+
+  // 7. Agents JS data array
+  const agentsJs = `    const AGENTS = [\n${agents
+    .map((a, i) => {
+      const style = AGENT_STYLES[i % AGENT_STYLES.length]
+      const icon = a.name.charAt(0).toUpperCase()
+      const desc = a.description.replace(/'/g, "\\'")
+      return `      { name: '${a.name}', icon: '${icon}', color: '${style.color}', bg: '${style.bg}', desc: '${desc}' },`
+    })
+    .join("\n")}\n    ];`
+  html = replaceJsMarker(html, "AGENTS_DATA", agentsJs)
+
+  // 8. Footer version
+  html = html.replace(
+    /(<div class="footer-brand">)GinStudio Skills[^<]*(<\/div>)/,
+    `$1GinStudio Skills v${ver}$2`,
+  )
+
+  // 9. Terminal animation version line
+  html = html.replace(
+    /(GinStudio Skills v)[\d.]+/,
+    `$1${ver}`,
+  )
+
+  writeFileSync(landingPath, html)
+}
+
+// ─── Run ───
 const skills = collectSkills()
 const agents = collectAgents()
 
@@ -178,5 +292,8 @@ skills.forEach((s) => console.log(`  - ${s.name}: ${s.description}`))
 console.log(`\nFound ${agents.length} agents:`)
 agents.forEach((a) => console.log(`  - ${a.name}: ${a.description}`))
 
-const { skillCount, agentCount } = updateReadme(skills, agents)
-console.log(`\nREADME.md updated with ${skillCount} skills and ${agentCount} agents.`)
+updateReadme(skills, agents)
+console.log(`\nREADME.md updated with ${skills.length} skills and ${agents.length} agents.`)
+
+updateLanding(skills, agents)
+console.log(`landing/index.html updated with ${skills.length} skills and ${agents.length} agents.`)

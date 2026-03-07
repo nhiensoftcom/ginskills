@@ -275,7 +275,7 @@ scan_solid() {
     relfile=$(relpath "$file")
 
     # Check for direct model/repository usage in controller
-    grep -n "\.find\(\|\.findOne\(\|\.create\(\|\.update\(\|\.delete\(\|\.save\(\|\.aggregate\(" "$file" 2>/dev/null | \
+    grep -nE '\.(find|findOne|create|update|delete|save|aggregate)\(' "$file" 2>/dev/null | \
       head -5 | while IFS=: read -r line _content; do
         add_finding "solid" "critical" "fat_controller" "$file" "$line" \
           "Controller contains database operations directly" \
@@ -305,7 +305,7 @@ scan_solid() {
 
   # ─── Service locator anti-pattern ────────────────────────
   while IFS= read -r file; do
-    grep -n "moduleRef\.get\(\|moduleRef\.resolve\(" "$file" 2>/dev/null | \
+    grep -nE 'moduleRef\.(get|resolve)\(' "$file" 2>/dev/null | \
       while IFS=: read -r line _content; do
         add_finding "solid" "warning" "service_locator" "$file" "$line" \
           "Using moduleRef.get() — service locator anti-pattern" \
@@ -315,7 +315,7 @@ scan_solid() {
 
   # ─── new keyword for service instantiation ───────────────
   while IFS= read -r file; do
-    grep -n "new .*Service\(\|new .*Repository\(\|new .*Controller\(" "$file" 2>/dev/null | \
+    grep -nE 'new .*(Service|Repository|Controller)\(' "$file" 2>/dev/null | \
       grep -v "\.spec\.\|\.test\.\|mock\|Mock\|stub\|Stub" | \
       while IFS=: read -r line content; do
         add_finding "solid" "warning" "dip_violation" "$file" "$line" \

@@ -103,38 +103,77 @@ Use the scripts in `scripts/` to get quick automated results first:
 
 The script checks for: hardcoded secrets, `any` type abuse, console.log of sensitive data, missing auth guards, unsafe eval, dependency vulnerabilities, and more.
 
+#### Deep Credential Scanning
+
+For comprehensive credential and API key leak detection, use the dedicated credential scanner:
+
+```bash
+# Scan entire project for leaked credentials (100+ patterns)
+./scripts/credential-scanner.sh /path/to/project
+
+# Scan with JSON output for CI/CD integration
+./scripts/credential-scanner.sh /path/to/project --format json --output report.json
+
+# Scan only critical/high severity
+./scripts/credential-scanner.sh /path/to/project --severity high
+
+# Scan specific category (cloud, payment, ai, vcs, etc.)
+./scripts/credential-scanner.sh /path/to/project --category cloud
+
+# Skip git history scanning (faster)
+./scripts/credential-scanner.sh /path/to/project --no-git-history
+
+# Run the test suite to validate all patterns
+./scripts/test-secret-detection.sh
+```
+
+The credential scanner uses a **multi-pass engine**:
+1. **Direct pattern matching** — 100+ provider-specific regex patterns (AWS, GCP, Stripe, GitHub, OpenAI, etc.)
+2. **Contextual pattern matching** — patterns that need surrounding context to reduce false positives
+3. **Entropy analysis** — Shannon entropy calculation on matched strings to distinguish real secrets from placeholders
+4. **File-based checks** — `.env` files, `.pem` keys, `credentials.json`, Docker/CI configs
+5. **Git history scanning** — finds secrets ever committed then deleted
+
+All patterns are defined in `scripts/secret-patterns.sh` (sourceable pattern database).
+Test coverage is in `scripts/test-fixtures.sh` + `scripts/test-secret-detection.sh`.
+
 ### 3. Manual Review by Category
 
 After automated checks, do targeted manual review based on findings.
 
 #### Category 1: Secrets & Credentials (CRITICAL)
 
-Scan for leaked secrets, hardcoded keys, and exposed credentials.
+Scan for leaked secrets, hardcoded keys, and exposed credentials. **Use `credential-scanner.sh` for comprehensive automated detection.**
 
-**What to look for:**
-- API keys, tokens, passwords in source code (not `.env`)
+```bash
+# Run the dedicated credential scanner first
+./scripts/credential-scanner.sh /path/to/project --format json --output cred-report.json
+```
+
+The credential scanner covers **100+ patterns** across these provider categories:
+
+| Category | Patterns | Examples |
+|----------|----------|----------|
+| **Cloud** | AWS, GCP, Azure | `AKIA...`, `AIza...`, Azure connection strings |
+| **Payment** | Stripe, Square, PayPal | `sk_live_...`, `sq0atp-...` |
+| **AI/ML** | OpenAI, Anthropic, HuggingFace | `sk-proj-...`, `sk-ant-...`, `hf_...` |
+| **VCS/CI** | GitHub, GitLab, CircleCI | `ghp_...`, `glpat-...`, `github_pat_...` |
+| **Communication** | Slack, Discord, Twilio, SendGrid | `xoxb-...`, `SG....`, `AC...` |
+| **Database** | MongoDB, PostgreSQL, MySQL, Redis | Connection strings with embedded passwords |
+| **Infrastructure** | Cloudflare, DigitalOcean, Vercel, Fly.io | `dop_v1_...`, `fo1_...` |
+| **Crypto** | RSA, EC, OpenSSH, PGP private keys | `-----BEGIN ... PRIVATE KEY-----` |
+| **Auth** | Firebase, Supabase, Auth0, Clerk | FCM keys, JWT tokens |
+| **Registry** | NPM, PyPI, RubyGems | `npm_...`, `pypi-...` |
+| **SaaS** | Linear, Notion, Doppler, PlanetScale | `lin_api_...`, `secret_...`, `dp.pt....` |
+| **Shopify** | Access, custom app, shared secret | `shpat_...`, `shpca_...` |
+| **Generic** | Passwords, secrets, tokens, Bearer, Basic | Entropy-based detection |
+
+**Additional manual checks:**
 - Secrets in `.env.example` that look real (not placeholder-ish)
-- Private keys committed to git
 - Secrets logged to console or error responses
 - Secrets in URL query parameters
-- Secrets in frontend bundles (anything prefixed `NEXT_PUBLIC_` or `EXPO_PUBLIC_`)
-
-**Known locations in this project:**
-- Check for hardcoded API keys in utility scripts and lib files
-- `.env.example` — check for example passwords that could be reused
-- `core/config/` — check all config files load from env, not hardcoded
-
-**Patterns to grep:**
-```bash
-# Hardcoded secrets
-grep -rn "password\s*[:=]\s*['\"]" --include="*.ts" --include="*.mjs"
-grep -rn "api[_-]?key\s*[:=]\s*['\"]" --include="*.ts" --include="*.mjs"
-grep -rn "secret\s*[:=]\s*['\"]" --include="*.ts"
-grep -rn "Bearer\s" --include="*.ts" --include="*.mjs"
-
-# Secrets in logs
-grep -rn "console\.log.*token\|console\.log.*password\|console\.log.*secret" --include="*.ts"
-```
+- Secrets in frontend bundles (`NEXT_PUBLIC_*`, `EXPO_PUBLIC_*`)
+- Check git history for deleted secret files: `git log --all --diff-filter=D -- "*.env" "*.pem" "*.key"`
 
 #### Category 2: Authentication & Authorization
 

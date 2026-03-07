@@ -189,3 +189,64 @@ const styles = StyleSheet.create({
   },
 })
 ```
+
+## Standard Card Pattern
+
+Consistent card style used across all sections (overview, lists, settings):
+
+```typescript
+const styles = StyleSheet.create({
+  card: {
+    backgroundColor: Theme.color.backgroundElevated,
+    borderRadius: Spacing.cardRadius,       // 16
+    padding: Spacing.cardPadding,           // 16
+    borderWidth: 1,
+    borderColor: Theme.color.border,
+  },
+})
+```
+
+For hero/featured cards, use `brandSubtle` background with `brandLight` border:
+```typescript
+heroCard: {
+  backgroundColor: Theme.color.brandSubtle,
+  borderRadius: Spacing.cardRadius,
+  padding: Spacing.cardPadding,
+  borderWidth: 1,
+  borderColor: Theme.color.brandLight,
+}
+```
+
+## Progress Bar Pattern
+
+Standard progress bar: 4px height, 2px radius, `backgroundMuted` track, `brand` fill.
+Use status colors (error/warning) only for actual error/warning states.
+
+```typescript
+progressTrack: {
+  height: 4,
+  borderRadius: 2,
+  backgroundColor: Theme.color.backgroundMuted,
+  overflow: "hidden",
+},
+progressFill: {
+  height: "100%",
+  borderRadius: 2,
+  backgroundColor: Theme.color.brand,   // Default — use consistently
+},
+```
+
+## Safe Area in Modals
+
+For absolute-positioned elements inside modals (e.g., close button in fullscreen image viewer),
+`SafeAreaView` doesn't reliably apply insets. Use `useSafeAreaInsets()` with explicit padding:
+
+```typescript
+const insets = useSafeAreaInsets()
+const topPadding = insets.top + (Platform.OS === "ios" ? 8 : 12)
+
+<View style={{ paddingTop: topPadding }}>
+  <TouchableOpacity onPress={onClose}>...</TouchableOpacity>
+</View>
+```
+```

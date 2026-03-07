@@ -133,8 +133,17 @@ function collectAgents() {
   return agents.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-function generateTable(items) {
-  const rows = items.map((item) => `| \`${item.name}\` | ${item.description} |`)
+function generateSkillsTable(items) {
+  const rows = items.map(
+    (item) => `| \`${item.name}\` | \`--skills ${item.name}\` | ${item.description} |`,
+  )
+  return rows.join("\n")
+}
+
+function generateAgentsTable(items) {
+  const rows = items.map(
+    (item) => `| \`${item.name}\` | \`--agents ${item.name}\` | ${item.description} |`,
+  )
   return rows.join("\n")
 }
 
@@ -143,14 +152,14 @@ function updateReadme(skills, agents) {
   let readme = readFileSync(readmePath, "utf-8")
 
   // Replace "## Available Skills" section
-  const skillsTable = `## Available Skills\n\n| Skill | Description |\n|-------|-------------|\n${generateTable(skills)}`
+  const skillsTable = `## Available Skills\n\n| Skill | Install | Description |\n|-------|---------|-------------|\n${generateSkillsTable(skills)}`
   readme = readme.replace(
     /## Available Skills\n[\s\S]*?(?=\n## )/,
     skillsTable + "\n\n",
   )
 
   // Replace "## Available Agents" section
-  const agentsTable = `## Available Agents\n\n| Agent | Description |\n|-------|-------------|\n${generateTable(agents)}`
+  const agentsTable = `## Available Agents\n\n| Agent | Install | Description |\n|-------|---------|-------------|\n${generateAgentsTable(agents)}`
   readme = readme.replace(
     /## Available Agents\n[\s\S]*?(?=\n## )/,
     agentsTable + "\n\n",

@@ -23,10 +23,12 @@
     "gen-readme": "node scripts/gen-readme.mjs",
     "check-upstream": "node scripts/check-upstream.mjs",
     "deploy": "npx wrangler pages deploy landing --project-name ginskill --branch main",
-    "prepublishOnly": "npm version patch --no-git-tag-version && node scripts/gen-readme.mjs",
-    "postpublish": "git add -A && git commit -m \"chore: release v$(node -p \"require('./package.json').version\")\" && git tag v$(node -p \"require('./package.json').version\") && git push && git push --tags && npm run deploy",
-    "release:minor": "npm version minor --no-git-tag-version && npm publish",
-    "release:major": "npm version major --no-git-tag-version && npm publish"
+    "gen-readme": "node scripts/gen-readme.mjs",
+    "preversion": "node scripts/gen-readme.mjs",
+    "postversion": "npm publish && git push && git push --tags && npm run deploy",
+    "release": "npm version patch",
+    "release:minor": "npm version minor",
+    "release:major": "npm version major"
   },
   "bin": {
     "gin-skills": "bin/cli.js"

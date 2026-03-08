@@ -232,6 +232,99 @@ async function loadPremiumFeatures() {
 }
 ```
 
+### 4.6 Expo Router Lazy Loading
+
+Expo Router's file-based routing introduces routing overhead that is worth understanding. Every file under `app/` is registered as a route at startup, but screen modules are code-split automatically — only the currently active route's module is evaluated.
+
+**File-based routing performance implications:**
+
+- Route discovery (scanning `app/` directory) happens at build time, not runtime — no overhead at startup.
+- Dynamic segments (`app/user/[id].tsx`) run a regex match per navigation event. On deeply nested or heavily parameterized routes this is negligible (<1 ms), but avoid deeply stacked dynamic segments on the critical path.
+- Expo Router wraps React Navigation internally; the `lazy` option on tab navigators is respected.
+
+**Automatic code splitting with Expo Router:**
+
+Metro splits each route file into its own chunk when `bundleSplitting` is enabled (Expo SDK 51+). Each screen file is only downloaded and evaluated on first visit.
+
+```json
+// app.json
+{
+  "expo": {
+    "experiments": {
+      "reactCanary": false
+    }
+  }
+}
+```
+
+**Lazy screen routes in tab/stack configuration:**
+
+```tsx
+// app/(tabs)/_layout.tsx
+import { Tabs } from 'expo-router';
+
+export default function TabLayout() {
+  return (
+    // lazy={true} is the default in Expo Router — tabs are not mounted until first visit
+    <Tabs screenOptions={{ lazy: true }}>
+      <Tabs.Screen name="index" options={{ title: 'Home' }} />
+      <Tabs.Screen name="explore" options={{ title: 'Explore' }} />
+      {/* This tab's JS module is never evaluated until the user taps it */}
+      <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
+    </Tabs>
+  );
+}
+```
+
+```tsx
+// app/(tabs)/explore.tsx — this entire module is deferred until first tab visit
+import { HeavyChart } from '../../components/HeavyChart';
+
+export default function ExploreScreen() {
+  return <HeavyChart />;
+}
+```
+
+**Optimized Expo Router app entry:**
+
+```tsx
+// app/_layout.tsx — keep this as lean as possible; it runs on every cold start
+import { Stack } from 'expo-router';
+import { SplashScreen } from 'expo-router';
+import { useEffect } from 'react';
+import { useFonts } from 'expo-font';
+
+// Prevent splash from hiding before assets are ready
+SplashScreen.preventAutoHideAsync();
+
+export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    'Inter-Regular': require('../assets/fonts/Inter-Regular.ttf'),
+  });
+
+  useEffect(() => {
+    if (fontsLoaded) {
+      // Hide splash only after fonts are ready — avoids FOUT
+      SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded]);
+
+  if (!fontsLoaded) return null;
+
+  return (
+    <Stack>
+      {/* index is on the critical path — keep it lightweight */}
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      {/* Modal screens are lazy — not evaluated until opened */}
+      <Stack.Screen name="modal/camera" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="modal/share" options={{ presentation: 'modal' }} />
+    </Stack>
+  );
+}
+```
+
+**Dynamic route matching overhead:** If you have many dynamic routes, prefer static routes for your most-visited paths. For example, use `app/profile.tsx` for the self-profile (static) and `app/user/[id].tsx` for other users (dynamic). The static match short-circuits before the regex engine runs.
+
 ---
 
 ## 5. Defer Non-Critical Initialization
@@ -377,6 +470,124 @@ const { data } = useQuery({
   staleTime: 30_000,
 });
 ```
+
+### 6.4 expo-splash-screen vs react-native-bootsplash
+
+Both libraries solve the splash screen problem, but with meaningfully different trade-offs depending on your project setup.
+
+| Feature | `expo-splash-screen` | `react-native-bootsplash` |
+|---|---|---|
+| Expo managed workflow | Native support, zero config | Requires bare workflow or config plugin |
+| Expo bare / RN CLI | Supported via config plugin | Fully supported, manual setup |
+| White flash on Android | Possible if `hideAsync` called late | None — uses Activity theme for splash |
+| Animated transition | JS-only fade/scale via `Animated` | Native `UIViewPropertyAnimator` (iOS) + ObjectAnimator (Android) |
+| Lottie support | No native lottie | Yes, via `@bam.tech/react-native-bootsplash` v5 |
+| Asset generation CLI | `npx expo install` + config | `npx react-native generate-bootsplash` |
+| Dark mode splash | Supported via asset catalogs | Supported via asset catalogs |
+| Custom brand animation | Manual (JS Animated API) | Native animation, lower jank risk |
+| Bundle size impact | ~2 KB (JS only) | ~8 KB native + ~3 KB JS |
+| Recommended for | Expo Go / managed workflow | Bare workflow with custom animations |
+
+**Transition choreography: native splash → skeleton → content**
+
+The goal is a seamless, perceptually fast transition with no blank white frames.
+
+```
+[0 ms]    Native splash (Activity theme — zero JS cost)
+[+Xms]    JS bundle evaluates, root component mounts
+[+Xms]    SplashScreen.hideAsync() called — native fade begins
+[+200ms]  Skeleton screen is visible (content layout placeholder)
+[+300ms]  Data arrives from cache or network
+[+350ms]  Real content replaces skeleton with a subtle fade
+```
+
+With `expo-splash-screen`:
+
+```tsx
+// app/_layout.tsx
+import * as SplashScreen from 'expo-splash-screen';
+import Animated, { FadeIn } from 'react-native-reanimated';
+
+SplashScreen.preventAutoHideAsync();
+
+export default function RootLayout() {
+  const [appReady, setAppReady] = useState(false);
+
+  useEffect(() => {
+    async function prepare() {
+      try {
+        await Promise.all([
+          loadFonts(),
+          resolveAuthState(),
+          queryClient.prefetchQuery({ queryKey: ['home-feed'], queryFn: fetchHomeFeed }),
+        ]);
+      } finally {
+        setAppReady(true);
+        // Fade takes 300ms on native side, matching our skeleton reveal
+        await SplashScreen.hideAsync();
+      }
+    }
+    prepare();
+  }, []);
+
+  if (!appReady) return null;
+
+  // Fade-in the first real view so it blends with the native splash fade-out
+  return (
+    <Animated.View style={{ flex: 1 }} entering={FadeIn.duration(200)}>
+      <Stack />
+    </Animated.View>
+  );
+}
+```
+
+With `react-native-bootsplash` (bare workflow, Lottie brand animation):
+
+```tsx
+// App.tsx
+import BootSplash from 'react-native-bootsplash';
+import { NavigationContainer } from '@react-navigation/native';
+
+function App() {
+  const handleNavigationReady = async () => {
+    // Native animator runs: logo shrinks + fades, content rises
+    await BootSplash.hide({
+      fade: true,     // cross-fade duration: 220ms native
+    });
+  };
+
+  return (
+    <NavigationContainer onReady={handleNavigationReady}>
+      <RootNavigator />
+    </NavigationContainer>
+  );
+}
+```
+
+**Measuring splash duration:**
+
+```ts
+import * as SplashScreen from 'expo-splash-screen';
+import { performance } from 'react-native-performance';
+
+// Mark when hide is requested
+performance.mark('splash-hide-request');
+await SplashScreen.hideAsync();
+performance.mark('splash-hide-complete');
+
+performance.measure(
+  'splash-visible-duration',
+  'nativeLaunchStart',
+  'splash-hide-complete',
+);
+
+// For bootsplash — it returns a promise that resolves when the animation finishes
+const start = Date.now();
+await BootSplash.hide({ fade: true });
+console.log('Splash visible for', Date.now() - start, 'ms');
+```
+
+Target: splash should be visible for no longer than the time needed to mount the first real screen. If it exceeds 800 ms, investigate what is blocking the critical path in `prepare()`.
 
 ---
 
@@ -623,6 +834,580 @@ node -e "
 "
 ```
 
+### 9.7 Platform-Specific TTI Measurement
+
+Different platforms expose different tooling for startup analysis. Use the right tool for each platform rather than relying solely on JS-side marks.
+
+**iOS: Xcode Instruments startup breakdown**
+
+1. Open Xcode → Product → Profile (Cmd+I) → choose **Time Profiler** instrument.
+2. Add the **App Launch** instrument from the library (available in Xcode 12+).
+3. Launch the app through Instruments — it records native init, dyld linking, ObjC runtime, and JS thread start as distinct intervals on the timeline.
+4. Key intervals to check:
+   - `dyld` loading — identify bloated dynamic frameworks.
+   - `_objc_init` / `+load` methods — third-party SDKs that slow native init.
+   - The gap between main thread start and the first `CALayer` commit — this is your JS evaluation window.
+5. Use **System Trace** alongside Time Profiler to see CPU scheduling and identify if the JS thread is being preempted.
+
+```
+Xcode Instruments → App Launch timeline sections:
+├── Process start → main()              (dyld, ObjC init)
+├── main() → RCTBridge init             (AppDelegate setup)
+├── RCTBridge init → runJsBundleEnd     (Hermes init + bundle eval)
+└── runJsBundleEnd → first CALayer      (React render → paint)
+```
+
+**Android: Profiler native timeline aligned with JS timeline**
+
+1. Android Studio → Run → Profile 'app' → CPU → Record method trace from startup.
+2. Choose **Callstack Sample** (lower overhead than instrumented) and start recording before launch.
+3. In the timeline, find the `Thread: mqt_js` row — this is the JS thread. Align it with the `Thread: main` row to see what native work precedes JS execution.
+4. Key signals:
+   - `Application.onCreate` duration — add a systrace marker if needed.
+   - `ReactHost.start()` → `createReactContextInBackground` gap.
+   - The `mqt_js` thread's first activity = start of bundle evaluation.
+
+```bash
+# systrace for Android (API < 34) — captures native + JS thread in one trace
+python3 $ANDROID_HOME/platform-tools/systrace/systrace.py \
+  --time=10 \
+  -o startup-trace.html \
+  app view gfx sched
+
+# For Android 14+ use Perfetto instead
+adb shell perfetto \
+  -c /data/misc/perfetto-configs/startup.pbtx \
+  -o /data/misc/perfetto-traces/startup.pb \
+  --txt
+```
+
+**Hermes CPU profiler for startup analysis**
+
+The Hermes sampling profiler is the most accurate way to pinpoint JS-side startup cost. It captures frame-level JS call stacks with ~1 ms resolution.
+
+```ts
+// Enable Hermes profiler in development builds only
+// In your debug menu or DevSettings screen:
+import { HermesInternal } from 'react-native';
+
+function startHermesProfiling() {
+  if (global.HermesInternal && __DEV__) {
+    // @ts-ignore — Hermes internal API
+    HermesInternal.enableSampledStats?.();
+  }
+}
+
+// After startup is complete, dump the profile:
+function dumpHermesProfile() {
+  if (global.HermesInternal) {
+    // @ts-ignore
+    const profile = HermesInternal.getInstrumentedStats?.();
+    console.log(JSON.stringify(profile));
+  }
+}
+```
+
+For a full CPU profile usable in Chrome DevTools:
+
+```bash
+# Connect device, trigger recording via Flipper Hermes Debugger
+# OR use the React Native dev menu → "Enable Sampling Profiler"
+# Profile file lands in: /sdcard/Download/hermesprofile-<timestamp>.cpuprofile
+
+# Pull it
+adb pull /sdcard/Download/hermesprofile-*.cpuprofile ./
+
+# Open in Chrome: chrome://inspect → Open dedicated DevTools → Profiler → Load
+```
+
+**Manual frame-by-frame TTI pinpointing**
+
+When automated marks are not granular enough, record the device screen at 240 fps (iPhone 15 Pro, Pixel 8 Pro) and step through frames.
+
+```bash
+# iOS — use QuickTime screen recording at maximum quality
+# Android — scrcpy with high framerate
+scrcpy --max-fps 60 --record startup.mp4
+
+# Count frames from app icon tap to first interactive frame
+# At 60 fps: 1 frame = 16.67 ms
+# At 240 fps: 1 frame = 4.17 ms (iPhone slow motion)
+```
+
+Mark the exact frame where:
+1. App icon lifts (launch animation starts) — frame 0.
+2. Native splash appears — frame N.
+3. Splash hides, content is visible — frame M.
+4. User can tap and receive feedback within 100 ms — TTI frame.
+
+Multiply frame count by frame duration (16.67 ms at 60 fps) to get wall-clock TTI.
+
+**Automated TTI measurement in CI**
+
+```yaml
+# .github/workflows/startup-benchmark.yml
+name: Startup TTI Benchmark
+on: [push]
+
+jobs:
+  android-tti:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build release APK
+        run: cd android && ./gradlew assembleRelease
+
+      - name: Install on emulator
+        run: |
+          adb install android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Measure cold start with Flashlight
+        run: |
+          npx @perf-tools/flashlight measure \
+            --bundleId com.example.app \
+            --scenario cold-start \
+            --iterations 10 \
+            --output ci-startup.json
+
+      - name: Assert TTI regression
+        run: |
+          node -e "
+            const { results } = require('./ci-startup.json');
+            const p95 = results.sort((a,b) => a.tti - b.tti)[Math.floor(results.length * 0.95)].tti;
+            const limit = parseInt(process.env.TTI_LIMIT_MS || '2500');
+            if (p95 > limit) {
+              console.error('P95 TTI REGRESSION: ' + p95 + ' ms (limit: ' + limit + ' ms)');
+              process.exit(1);
+            }
+            console.log('P95 TTI OK: ' + p95 + ' ms');
+          "
+        env:
+          TTI_LIMIT_MS: '2500'
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: startup-report
+          path: ci-startup.json
+```
+
+For iOS in CI, use `xcrun simctl` with a booted simulator and measure launch time via `os_signpost` or the `MetricKit` framework in a test target:
+
+```swift
+// StartupTests.swift — XCTest performance test for TTI
+import XCTest
+
+class StartupPerformanceTests: XCTestCase {
+    func testColdStartTTI() throws {
+        let app = XCUIApplication()
+        let options = XCTMeasureOptions()
+        options.iterationCount = 5
+
+        measure(metrics: [XCTApplicationLaunchMetric()], options: options) {
+            app.launch()
+            // Wait for the first interactive element
+            XCTAssertTrue(app.buttons["HomeTabButton"].waitForExistence(timeout: 5))
+            app.terminate()
+        }
+    }
+}
+```
+
+Run in CI with: `xcodebuild test -scheme MyApp -destination 'platform=iOS Simulator,name=iPhone 15'`
+
+---
+
+## 10. Hermes Bytecode Precompilation (.hbc)
+
+When Hermes is enabled, your JavaScript bundle is not shipped to the device as plain text. Instead, it is compiled to Hermes Bytecode (`.hbc`) at build time. The device runs the bytecode directly — no parsing, no AST construction, no compilation at launch.
+
+### How .hbc compilation happens at build time
+
+For React Native CLI projects the compilation happens inside the Metro bundler pipeline via `hermesc` (the Hermes compiler):
+
+```
+metro bundle → index.js (plain JS)
+    ↓
+hermesc --emit-binary -out index.android.bundle index.js
+    ↓
+index.android.bundle  (binary .hbc format, ~33% smaller than plain JS)
+    ↓
+embedded into APK/IPA at the path assets/index.android.bundle
+```
+
+For Expo managed workflow this is handled transparently by `expo export` and EAS Build. You do not invoke `hermesc` directly.
+
+### Hermesc pipeline and verification with hbctool
+
+```bash
+# Check hermesc version bundled with your RN version
+node_modules/react-native/sdks/hermesc/osx-bin/hermesc --version
+
+# Manually compile a bundle for inspection (rarely needed, but useful for debugging)
+node_modules/react-native/sdks/hermesc/osx-bin/hermesc \
+  --emit-binary \
+  --out /tmp/test.hbc \
+  /tmp/index.js
+
+# Inspect the bytecode with hbctool (install: pip3 install hbctool)
+hbctool disasm /tmp/test.hbc /tmp/disassembled/
+
+# Verify the output bundle is bytecode (not plain JS)
+file android/app/build/intermediates/assets/release/index.android.bundle
+# Expected output:
+# index.android.bundle: Hermes JavaScript bytecode, version 96
+```
+
+If the file command returns `ASCII text` instead of `Hermes JavaScript bytecode`, bytecode precompilation has failed silently.
+
+### Bytecode size vs JS size
+
+Hermes bytecode is consistently smaller than the equivalent plain JS bundle because:
+- String constants are deduplicated into a string table.
+- The bytecode instruction encoding is denser than source text.
+- Sourcemaps are stripped (stored separately as `.map` files).
+
+| Bundle type | Typical size (3 MB app) | Typical size (10 MB app) |
+|---|---|---|
+| Plain JS (minified + gzip) | 3.0 MB | 10.0 MB |
+| Hermes bytecode (.hbc) | ~2.0 MB | ~6.7 MB |
+| Reduction | ~33% | ~33% |
+
+Note: the 33% figure is consistent across bundle sizes but depends on the ratio of string literals to logic in your codebase.
+
+### How to detect if bytecode precompilation failed silently
+
+Build pipelines can fall back to plain JS without error if `hermesc` is not found or if the compilation step is skipped. This causes a significant startup regression that is easy to miss.
+
+**Detection method 1 — file inspection (CI-safe):**
+
+```bash
+# After building the release APK/IPA, extract and check the bundle
+# Android:
+unzip -p android/app/build/outputs/apk/release/app-release.apk \
+  assets/index.android.bundle > /tmp/bundle
+
+file /tmp/bundle
+# Must say: Hermes JavaScript bytecode, version N
+# If it says: ASCII text — bytecode compilation is broken
+
+# iOS:
+# Extract from the .app directory inside the IPA
+unzip -p ios/build/MyApp.ipa Payload/MyApp.app/main.jsbundle > /tmp/bundle
+file /tmp/bundle
+```
+
+**Detection method 2 — size anomaly check:**
+
+```bash
+# Add this to your CI pipeline
+BUNDLE_SIZE=$(wc -c < android/app/build/outputs/apk/release/app-release.apk)
+EXPECTED_MAX=20971520  # 20 MB — adjust for your app
+
+if [ "$BUNDLE_SIZE" -gt "$EXPECTED_MAX" ]; then
+  echo "WARNING: APK size $BUNDLE_SIZE exceeds expected maximum."
+  echo "Check if Hermes bytecode compilation is active."
+fi
+```
+
+**Detection method 3 — startup time spike in production monitoring:**
+
+If your Sentry or Firebase cold start P90 suddenly jumps by 40–100% on a release, and no JS code changes were made, suspect a failed bytecode build.
+
+### Runtime detection of bytecode vs source mode
+
+```ts
+// Detect at runtime whether Hermes is running bytecode or interpreting source
+function getJSEngineInfo(): { engine: string; bytecodeMode: boolean } {
+  const isHermes = !!global.HermesInternal;
+
+  if (!isHermes) {
+    return { engine: 'JSC', bytecodeMode: false };
+  }
+
+  // HermesInternal.getRuntimeProperties() includes bytecode version info
+  // @ts-ignore — Hermes internal API
+  const props = global.HermesInternal?.getRuntimeProperties?.() ?? {};
+
+  return {
+    engine: 'Hermes',
+    // If bytecodeVersion is present and non-zero, we are running precompiled bytecode
+    bytecodeMode: typeof props.Bytecode === 'number' && props.Bytecode > 0,
+  };
+}
+
+// Log in your app's debug screen or startup analytics
+const engineInfo = getJSEngineInfo();
+console.log('JS engine:', engineInfo.engine, '| Bytecode mode:', engineInfo.bytecodeMode);
+// Expected in production: { engine: 'Hermes', bytecodeMode: true }
+// If bytecodeMode is false in a production build, bytecode compilation is broken
+```
+
+Add this check to your Sentry startup breadcrumb so you get an alert when a production release unexpectedly runs in source mode:
+
+```ts
+import * as Sentry from '@sentry/react-native';
+
+const engineInfo = getJSEngineInfo();
+Sentry.addBreadcrumb({
+  category: 'startup',
+  message: 'JS engine info',
+  data: engineInfo,
+  level: engineInfo.bytecodeMode ? 'info' : 'warning',
+});
+
+if (!engineInfo.bytecodeMode && !__DEV__) {
+  Sentry.captureMessage('Production build running in JS source mode (bytecode disabled)', 'error');
+}
+```
+
+---
+
+## 11. Warm Start Optimization
+
+A warm start occurs when the OS restores an app from the background to the foreground. The process already exists in memory; the JS engine is still initialized. Warm start TTI should be near-zero — but it often is not, because apps incorrectly re-run initialization code that is only needed on cold start.
+
+### Memory rehydration patterns
+
+On a warm start, React state and refs are preserved exactly as they were when the app was backgrounded. You do not need to re-fetch data, re-initialize services, or re-run effects that already ran.
+
+The key is to gate initialization logic on whether it has already run:
+
+```ts
+// services/appInit.ts
+let hasInitialized = false;
+
+export async function initializeApp() {
+  if (hasInitialized) {
+    // Warm start: skip all initialization
+    return;
+  }
+
+  // Cold start path
+  await Promise.all([
+    loadFonts(),
+    resolveAuthState(),
+    initializeSentry(),
+    registerPushNotifications(),
+  ]);
+
+  hasInitialized = true;
+}
+```
+
+```tsx
+// App.tsx
+import { AppState, AppStateStatus } from 'react-native';
+
+function App() {
+  useEffect(() => {
+    // Only run on mount (cold start)
+    initializeApp();
+  }, []);
+
+  // AppState listener for foreground/background transitions
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        // Warm start or foreground — do NOT re-initialize services
+        // Only handle things that must refresh on each foreground:
+        handleForeground();
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+}
+
+async function handleForeground() {
+  // Minimal work: check token expiry, refresh stale data if needed
+  await refreshAuthTokenIfExpired();
+  queryClient.invalidateQueries({ queryKey: ['user'] }); // background refetch, non-blocking
+}
+```
+
+### Avoiding full re-initialization on foreground
+
+Common anti-patterns that cause slow warm starts:
+
+```ts
+// BAD: re-initializes Sentry on every foreground
+AppState.addEventListener('change', (state) => {
+  if (state === 'active') {
+    Sentry.init({ dsn: ... }); // DO NOT re-init SDKs on foreground
+  }
+});
+
+// BAD: navigation state reset on foreground destroys warm start feel
+AppState.addEventListener('change', (state) => {
+  if (state === 'active') {
+    navigationRef.current?.reset({ index: 0, routes: [{ name: 'Home' }] });
+  }
+});
+
+// GOOD: only do the minimum required work on foreground
+AppState.addEventListener('change', (state) => {
+  if (state === 'active') {
+    checkSessionExpiry();  // lightweight token check
+  }
+});
+```
+
+### Measuring warm start TTI vs cold start
+
+```ts
+import { AppState } from 'react-native';
+import { performance } from 'react-native-performance';
+
+let backgroundedAt: number | null = null;
+
+AppState.addEventListener('change', (nextState) => {
+  if (nextState === 'background') {
+    backgroundedAt = Date.now();
+    performance.mark('app-backgrounded');
+  }
+
+  if (nextState === 'active' && backgroundedAt !== null) {
+    const warmStartDuration = Date.now() - backgroundedAt;
+
+    performance.mark('app-foregrounded');
+    performance.measure('warm-start', 'app-backgrounded', 'app-foregrounded');
+
+    console.log(`Warm start: ${warmStartDuration} ms`);
+
+    // Alert if warm start takes longer than expected — indicates re-initialization bug
+    if (warmStartDuration > 500) {
+      console.warn('Slow warm start detected. Check for unnecessary re-initialization.');
+    }
+
+    backgroundedAt = null;
+  }
+});
+```
+
+Target warm start TTI: < 300 ms on mid-tier Android. If you measure > 500 ms, profile which code is running in `AppState` change listeners and `useEffect` hooks that run on navigation focus.
+
+### Platform-specific: iOS jetsam risk, Android low-memory killer
+
+**iOS — Jetsam:**
+
+iOS terminates backgrounded apps when memory pressure is high (jetsam). After jetsam, the next launch is a full cold start — the process is gone. You cannot prevent jetsam, but you can make recovery from it fast:
+
+- Persist navigation state to AsyncStorage so the user is returned to their last screen.
+- Persist scroll position and form state for the current screen.
+- Do not store large in-memory caches that cannot be cheaply rebuilt — they inflate your memory footprint and increase jetsam risk.
+
+```ts
+// Persist navigation state across jetsam kills
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const NAV_STATE_KEY = '@nav_state';
+
+async function persistNavState(state: NavigationState) {
+  await AsyncStorage.setItem(NAV_STATE_KEY, JSON.stringify(state));
+}
+
+async function loadNavState(): Promise<NavigationState | undefined> {
+  const raw = await AsyncStorage.getItem(NAV_STATE_KEY);
+  return raw ? JSON.parse(raw) : undefined;
+}
+
+// In NavigationContainer:
+<NavigationContainer
+  initialState={await loadNavState()}
+  onStateChange={persistNavState}
+>
+```
+
+Detect jetsam in your analytics:
+
+```ts
+// If app was terminated mid-session (backgrounded then jetsammed), Sentry reports this
+// as a new cold start. You can detect it by comparing session timestamps:
+const lastSessionEnd = await AsyncStorage.getItem('@last_session_end');
+const lastSessionEndTime = lastSessionEnd ? parseInt(lastSessionEnd) : 0;
+const timeSinceLastSession = Date.now() - lastSessionEndTime;
+
+// If the app was in the background for less than 30 minutes but still cold-started,
+// it was likely jetsammed
+const wasJetsammed = timeSinceLastSession < 30 * 60 * 1000 && isColdStart();
+if (wasJetsammed) {
+  analytics().logEvent('app_jetsammed');
+}
+```
+
+**Android — Low-Memory Killer (LMK):**
+
+Android's LMK terminates cached processes (backgrounded apps) when RAM is constrained. Unlike iOS jetsam, Android provides more predictability via `onTrimMemory` callbacks.
+
+```java
+// MainApplication.java — respond to memory pressure signals
+@Override
+public void onTrimMemory(int level) {
+  super.onTrimMemory(level);
+  if (level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE) {
+    // Release in-memory caches to lower LMK risk
+    imageCache.evictAll();
+  }
+}
+```
+
+In React Native (JS side), listen for the memory warning event:
+
+```ts
+import { Platform, NativeModules } from 'react-native';
+
+// iOS: memoryWarning is a native event
+// Android: no direct equivalent — use onTrimMemory via a native module
+
+if (Platform.OS === 'ios') {
+  // expo-notifications and other Expo modules surface this as an AppState event
+  // Listen and clear non-critical caches
+  const subscription = AppState.addEventListener('memoryWarning' as any, () => {
+    queryClient.clear();  // clear React Query cache to free memory
+    imageCache?.clear();
+  });
+}
+```
+
+### State preservation across background/foreground cycles
+
+Use Zustand's `persist` middleware with AsyncStorage to make state survive both warm starts and jetsam/LMK kills:
+
+```ts
+import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+interface SessionStore {
+  lastViewedFeedId: string | null;
+  scrollOffset: number;
+  setLastViewedFeedId: (id: string) => void;
+  setScrollOffset: (offset: number) => void;
+}
+
+export const useSessionStore = create<SessionStore>()(
+  persist(
+    (set) => ({
+      lastViewedFeedId: null,
+      scrollOffset: 0,
+      setLastViewedFeedId: (id) => set({ lastViewedFeedId: id }),
+      setScrollOffset: (offset) => set({ scrollOffset: offset }),
+    }),
+    {
+      name: 'session-store',
+      storage: createJSONStorage(() => AsyncStorage),
+      // Only persist what is needed for state restoration
+      partialize: (state) => ({
+        lastViewedFeedId: state.lastViewedFeedId,
+        scrollOffset: state.scrollOffset,
+      }),
+    },
+  ),
+);
+```
+
+On warm start, `useSessionStore` rehydrates from AsyncStorage synchronously (Zustand's persist layer reads the cache on first access). The user sees their previous scroll position without any loading state.
+
 ---
 
 ## Summary: Startup Optimization Priority
@@ -630,12 +1415,18 @@ node -e "
 | Priority | Action | Typical Saving |
 |---|---|---|
 | P0 | Enable Hermes | 40–60% eval time reduction |
+| P0 | Verify Hermes bytecode precompilation (.hbc) | ~33% bundle size, eliminates parse time |
 | P0 | Enable `inlineRequires` | 100–300 ms |
 | P1 | Remove / replace heavy libs | 50–200 ms |
 | P1 | Defer analytics + push init | 80–150 ms |
 | P1 | Switch to react-native-bootsplash | Eliminates white flash |
+| P1 | Gate re-initialization on cold start only | 0–300 ms warm start recovery |
 | P2 | Lazy-load non-critical screens | 30–100 ms |
+| P2 | Expo Router lazy tabs (lazy: true) | 20–80 ms per deferred tab |
 | P2 | Prefetch critical data | Perceived 0 ms load |
+| P2 | Persist nav state for jetsam recovery | Perceived instant recovery |
 | P3 | Skeleton screens | Perceived performance |
 | P3 | Pre-warm JS engine (Android) | 50–100 ms |
 | P3 | Image + font preloading | Eliminates layout shift |
+| P3 | Native splash → skeleton choreography | Zero white-flash transition |
+| P3 | Automated TTI in CI (Flashlight / XCTest) | Regression prevention |

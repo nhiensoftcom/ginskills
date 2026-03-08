@@ -1,48 +1,56 @@
-# Senior/Staff-Level React Native Performance Tricks
+# Senior-Level React Native Performance Tricks
 
-A deep-dive reference for engineers operating beyond the basics. Each section targets a distinct performance surface area with concrete, actionable guidance.
+A collection of hard-won performance knowledge for React Native engineers working on production applications at scale.
 
 ---
 
 ## 1. Hidden Performance Killers
 
-These issues are invisible in dev mode but degrade real-user experience significantly.
-
 ### console.log in Production
 
-Every `console.log` call crosses the JS-to-native bridge synchronously. On a mid-range Android device this costs approximately 1 ms per call. In tight loops or render functions this compounds quickly.
+Every `console.log` call serializes its arguments, crosses the JS-to-native bridge, and blocks the JS thread while doing so. In development this is acceptable noise. In production it is silent death by a thousand cuts.
 
-Strip all console calls at build time using `babel-plugin-transform-remove-console`:
+Strip all console calls at build time using the Babel plugin:
+
+```bash
+npm install --save-dev babel-plugin-transform-remove-console
+```
 
 ```js
 // babel.config.js
 module.exports = {
   plugins: [
-    process.env.NODE_ENV === 'production' && 'transform-remove-console',
-  ].filter(Boolean),
+    ['transform-remove-console', { exclude: ['error', 'warn'] }],
+  ],
 };
 ```
 
-Do not rely on runtime guards like `if (__DEV__)` — the check itself still executes.
+Do not rely on runtime guards like `if (__DEV__)` — the check itself still executes. The plugin removes the call entirely at compile time.
+
+Keep `error` and `warn` if your error tracking system hooks into them, otherwise remove all levels.
 
 ### StyleSheet.create vs Inline Style Objects
 
-`StyleSheet.create` registers styles with the native layer once at module load time. Inline objects are allocated fresh every render, triggering both JS GC pressure and potential layout recalculations.
+`StyleSheet.create` registers styles with the native layer once at module initialization and sends them as integer IDs across the bridge. Inline style objects (`style={{ color: 'red' }}`) allocate a new object on every render, increasing GC pressure and preventing the bridge optimization.
 
-```js
-// Bad: new object every render
+```tsx
+// Bad — new object every render
 <View style={{ flex: 1, backgroundColor: '#fff' }} />
 
-// Good: registered once
-const styles = StyleSheet.create({ container: { flex: 1, backgroundColor: '#fff' } });
+// Good — registered once
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff' },
+});
 <View style={styles.container} />
 ```
 
-Benchmarks on complex style trees show approximately 3x faster style application with `StyleSheet.create`.
+Exception: truly dynamic values (e.g., `{ width: someVariable }`) must be inline or memoized with `useMemo`.
 
-### Debug Mode Is 10x Slower
+### Debug Mode is 7-10x Slower
 
-The Metro bundler in development mode disables minification, enables source maps, and activates the React DevTools protocol. The JS engine is unoptimized and Hermes JIT is partially disabled. **Never profile in dev mode.** Always build a release variant:
+Metro bundles without minification in development. The JS engine runs in interpreted mode, not Hermes bytecode. Remote debugging (deprecated) was even worse — all JS executed in Chrome's V8 over a WebSocket.
+
+**Always profile release builds.** A screen that feels smooth in development may drop frames in production under real-world conditions.
 
 ```bash
 # Android
@@ -52,461 +60,496 @@ npx react-native run-android --variant=release
 npx react-native run-ios --configuration Release
 ```
 
-### Flipper Overhead
+### Flipper: Removed from Template — Stop Adding It Back
 
-Flipper injects a native SDK into both Android and iOS that opens sockets, intercepts network calls, and mirrors the layout tree. On startup alone this costs 10–20% of launch time.
+Flipper was removed from the React Native default template in RN 0.73. It adds native startup overhead (plugin initialization, socket setup, network interception) and its React DevTools plugin duplicates functionality now available in the standalone **React Native DevTools**, which ships with RN 0.73+ and launches automatically with Metro.
 
-Remove Flipper from release builds:
+Use React Native DevTools for component inspection, profiling, and network debugging. It has zero production overhead.
 
-```ruby
-# ios/Podfile
-if !ENV['NO_FLIPPER'] || ENV['NO_FLIPPER'] == '0'
-  use_flipper!
-end
+### Context Re-renders Every Consumer
+
+React Context has no selector mechanism. Any state change in a context value re-renders **all** consumers of that context, regardless of whether the specific field they use changed.
+
+```tsx
+// Bad — all consumers re-render when anything changes
+const AppContext = createContext({ user: null, theme: 'light', cart: [] });
+
+// Better — split by update frequency
+const UserContext = createContext(null);   // changes rarely
+const ThemeContext = createContext('light'); // changes rarely
+const CartContext = createContext([]);      // changes often
 ```
 
-```groovy
-// android/app/build.gradle
-releaseImplementation('com.facebook.flipper:flipper') { transitive = false }
-// Remove from release dependencies entirely
+For fine-grained subscriptions without splitting, use Zustand selectors or `use-context-selector`. In React 19+, `use(Context)` with compiler optimizations may alleviate this, but splitting remains the cleaner architecture.
+
+### Platform.select Inside Render
+
+`Platform.select` and `Platform.OS` are constants that never change at runtime. Evaluating them inside a component body is wasted work on every render.
+
+```tsx
+// Bad — evaluated every render
+function MyComponent() {
+  const paddingTop = Platform.select({ ios: 44, android: 0 });
+  return <View style={{ paddingTop }} />;
+}
+
+// Good — evaluated once at module load
+const HEADER_PADDING = Platform.select({ ios: 44, android: 0 });
+
+function MyComponent() {
+  return <View style={{ paddingTop: HEADER_PADDING }} />;
+}
 ```
-
-### Context Re-Render Propagation
-
-Every `Context.Provider` value change re-renders all consumers in the subtree, even those that don't use the changed slice. This is the most common source of invisible re-renders in large apps.
-
-Strategies:
-1. **Split context by update frequency**: separate `UserContext` (rare) from `UIContext` (frequent)
-2. **Use Zustand or Jotai** for high-frequency state (animations, counters, search input)
-3. **useMemo the value** to prevent reference churn when the data hasn't changed
-
-```js
-// Avoid
-const value = { user, settings, theme }; // new object every parent render
-<AppContext.Provider value={value}>
-
-// Fix
-const value = useMemo(() => ({ user, settings, theme }), [user, settings, theme]);
-<AppContext.Provider value={value}>
-```
-
-### Platform.select / Platform.OS Inside Render
-
-`Platform.OS` is a constant that never changes at runtime. Evaluating it inside a render function is wasted work on every call.
-
-```js
-// Bad: evaluated every render
-const hitSlop = Platform.select({ ios: 8, android: 4 });
-
-// Good: evaluated once at module level
-const HIT_SLOP = Platform.select({ ios: 8, android: 4 });
-```
-
-### React Native DevTools When Profiling
-
-The RN DevTools bridge adds measurable latency to all state updates when the debugger is attached. Detach DevTools before capturing production-representative flamecharts.
 
 ---
 
 ## 2. Native-Level Optimizations
 
-### View Flattening (New Architecture / Fabric)
+### Fabric View Flattening
 
-In the Old Architecture, every React `<View>` mapped to a native view node, making deep component trees expensive. Fabric's renderer detects purely layout views with no visual output (no background, no border, no touch handling) and flattens them out of the native view hierarchy automatically.
+With the New Architecture (Fabric renderer), React Native automatically flattens layout-only views — views that contribute to layout but render no pixels (no background, border, or touch handler). This reduces native view hierarchy depth and improves traversal speed.
 
-To help the renderer: avoid adding `backgroundColor`, `border`, or `onPress` to wrapper views unless actually needed. Use `collapsable={true}` on Android for manual hints in the Old Architecture.
+If you hold a `ref` to a view that gets flattened, the ref will be `null`. Use `collapsable={false}` to prevent flattening for a specific view:
 
-### FlashList View Recycling
-
-FlashList (Shopify) mirrors RecyclerView (Android) and UICollectionView (iOS) by maintaining a pool of off-screen views and recycling them rather than destroying and creating. Key implications:
-
-- **Do not store component-local state** in list items — the component instance is reused for a different item
-- `keyExtractor` must return stable, unique keys so recycling maps to the right data
-- Set `estimatedItemSize` as accurately as possible; wrong values cause layout thrashing during scroll
-
-### GPU vs CPU Rendering
-
-The compositor (GPU) handles transforms and opacity without involving the JS thread or even the main thread layout pass. CPU-bound properties (anything affecting layout: `width`, `height`, `padding`, `backgroundColor`) require a layout pass and repaint.
-
-Rule: animate with `transform` and `opacity` only. Never animate layout properties in a loop.
-
-```js
-// GPU — no layout pass
-style={{ transform: [{ translateY: animValue }], opacity: fadeValue }}
-
-// CPU — triggers layout + repaint every frame
-style={{ top: animValue, height: expandValue }}
+```tsx
+<View ref={myRef} collapsable={false} style={styles.target} />
 ```
 
-### iOS Layer Rasterization
+Do not apply `collapsable={false}` broadly — it defeats the optimization.
 
-For complex, static views (headers, cards that don't change content), `shouldRasterize` + `rasterizationScale` caches the rendered layer as a bitmap on the GPU. Subsequent frames skip compositing entirely.
+### FlashList Cell Recycling
 
-```js
-<View style={{ shouldRasterize: true, rasterizationScale: PixelRatio.get() }}>
-  <ComplexStaticCard />
+React Native's `FlatList` creates and destroys native views as cells scroll in and out of the viewport. `FlashList` (by Shopify) recycles the view instances — it swaps the data binding instead of destroying and recreating the native view tree. Benchmarks show 5-10x faster scroll performance on large lists.
+
+```bash
+npm install @shopify/flash-list
+```
+
+```tsx
+import { FlashList } from '@shopify/flash-list';
+
+<FlashList
+  data={items}
+  renderItem={({ item }) => <ItemCard item={item} />}
+  estimatedItemSize={80}
+  keyExtractor={(item) => item.id}
+/>
+```
+
+`estimatedItemSize` is required and must be accurate — measure your actual rendered cell height. Inaccurate estimates cause scroll position jumps.
+
+### GPU vs CPU Compositing
+
+Understand which style properties trigger GPU compositing vs CPU layout:
+
+| Property | Pipeline Stage | Cost |
+|---|---|---|
+| `opacity` | GPU compositing | Low |
+| `transform` | GPU compositing | Low |
+| `backgroundColor` (change) | CPU paint | Medium |
+| `width` / `height` change | CPU layout + paint | High |
+| `borderRadius` + shadow | CPU offscreen render | High |
+
+Animate only `opacity` and `transform`. Never animate layout properties (`width`, `height`, `top`, `left`, `margin`, `padding`) — use `transform: [{ translateX }]` instead of animating `left`.
+
+### shouldRasterizeIOS for Static Complex Views
+
+When a view is visually complex but infrequently changes, rasterizing it to a bitmap lets the GPU composite the cached bitmap instead of re-rendering the view hierarchy each frame.
+
+```tsx
+<View shouldRasterizeIOS rasterizationScale={PixelRatio.get()}>
+  <ComplexStaticBadge />
 </View>
 ```
 
-Use with caution: if the view updates frequently, the rasterization cost exceeds the savings.
+Use only for truly static views. If the view's content changes frequently, rasterization adds overhead because the bitmap must be invalidated and redrawn.
 
-### iOS Shadow Performance
+### iOS Shadows are Expensive
 
-`shadowColor`, `shadowOffset`, `shadowRadius` force an offscreen render pass on iOS because the shadow must be computed from the view's alpha mask. On Android, `elevation` uses the Material shadow system which is GPU-accelerated.
+`shadowColor` / `shadowOffset` / `shadowRadius` on iOS trigger an offscreen render pass for the shadow. On a list with 50 cards, that is 50 offscreen passes per frame. On Android, `elevation` uses the Material shadow system which is GPU-accelerated and cheap.
 
-For iOS: either use a pre-rendered shadow image, wrap in a sibling view with `backgroundColor` and blur effect, or accept the performance cost only for static elements.
+Alternatives for iOS:
+- Use a separate sibling "shadow view" positioned behind the card with a blurred background
+- Use pre-baked shadow images
+- Use a subtle `borderWidth: 1` + `borderColor: 'rgba(0,0,0,0.08)'` — often reads as well as a shadow at a fraction of the cost
 
-### Border Radius Compositing Cost
+### Opacity vs display:none vs Conditional Render
 
-Complex `borderRadius` (individual corners with different values, combined with `overflow: hidden`) triggers offscreen compositing. Every view with `overflow: hidden` and a non-trivial shape creates a new compositing layer.
-
-Minimize layered `overflow: hidden` — especially avoid nesting them. Prefer uniform `borderRadius` values.
-
-### Opacity vs Conditional Rendering vs display:none
-
-| Approach | Native Cost | JS Cost | Re-render on Show |
+| Technique | Native View Exists | Layout Calculated | JS Component Mounted |
 |---|---|---|---|
-| `opacity: 0` | View exists in hierarchy, GPU skips draw | None | No |
-| `display: 'none'` | View removed from layout tree | None | Layout recalc |
-| `{condition && <Component />}` | View destroyed/created | Mount/unmount cycle | Full mount |
-| `react-freeze` | Subtree frozen in place | Minimal | No |
+| `opacity: 0` | Yes | Yes | Yes |
+| `display: 'none'` | Yes | No | Yes |
+| Conditional render (`&&`) | No | No | No (unmounted) |
+| `react-freeze` | Yes | Yes | Yes (frozen) |
 
-For tab screens and modals: prefer `opacity: 0` or `react-freeze` to avoid remount cost.
+Use `display: 'none'` when you want to hide without unmounting (preserves state, avoids re-mount cost). Use conditional rendering when the hidden content is heavy and you want to free memory. Use `opacity: 0` only for animation transitions.
 
 ---
 
-## 3. Advanced React Patterns
+## 3. React Compiler (2025 Game-Changer)
 
-### react-freeze for Offscreen Screens
+### What React Compiler Does
 
-When navigating between tabs, the inactive tabs continue re-rendering if their state updates. `react-freeze` wraps a subtree in a Suspense-like boundary that pauses rendering when `freeze={true}`.
+React Compiler (formerly "React Forget") performs static analysis of your component code and automatically inserts memoization — eliminating the need to manually write `useMemo`, `useCallback`, and `React.memo`.
+
+Measured impact from Meta's production rollout across 1,231 components:
+- 20-30% reduction in render time
+- No code changes required beyond enabling the compiler
+
+### Expo SDK 54 Default Enablement
+
+Expo SDK 54 enables React Compiler by default for new projects. For existing projects:
+
+```bash
+npx expo install babel-plugin-react-compiler
+```
 
 ```js
-import { Freeze } from 'react-freeze';
+// babel.config.js
+module.exports = {
+  plugins: ['babel-plugin-react-compiler'],
+};
+```
 
-function TabNavigator({ activeTab }) {
+### React Compiler 1.0 Metrics
+
+React Compiler 1.0 (released 2025) shows:
+- 12% faster initial load times
+- 2.5x quicker interaction response times
+- Automatic optimization of previously unoptimized components
+
+### When Manual Memoization Still Matters
+
+React Compiler handles most cases but cannot optimize:
+- Impure functions that read external mutable state
+- Components using non-standard patterns the compiler cannot analyze
+- Third-party library components you do not own
+
+In these cases, manual `useMemo`/`useCallback` remains necessary.
+
+---
+
+## 4. Advanced React Patterns
+
+### react-freeze for Offscreen Tabs
+
+Tab navigators keep all tab screens mounted to preserve state. Those mounted-but-invisible screens still participate in React's render cycle. `react-freeze` uses React's experimental `<Offscreen>` primitive to freeze the render tree of inactive screens.
+
+```bash
+npm install react-freeze
+```
+
+```tsx
+import { enableFreeze } from 'react-freeze';
+
+// Call once at app startup, before any navigation renders
+enableFreeze(true);
+```
+
+React Navigation 6+ integrates react-freeze automatically via the `freezeOnBlur` prop on `Screen`. No further configuration needed in most setups.
+
+### useTransition and useDeferredValue
+
+For heavy list filtering, search, or sorting operations, defer the expensive re-render to avoid blocking user input:
+
+```tsx
+import { useTransition, useDeferredValue } from 'react';
+
+function SearchScreen() {
+  const [query, setQuery] = useState('');
+  const [isPending, startTransition] = useTransition();
+  const deferredQuery = useDeferredValue(query);
+
+  const results = useMemo(
+    () => filterLargeDataset(deferredQuery),
+    [deferredQuery]
+  );
+
   return (
     <>
-      <Freeze freeze={activeTab !== 'home'}><HomeScreen /></Freeze>
-      <Freeze freeze={activeTab !== 'profile'}><ProfileScreen /></Freeze>
+      <TextInput
+        value={query}
+        onChangeText={(text) => {
+          setQuery(text); // Immediate update for the input
+          startTransition(() => {
+            // Transition marker — heavy re-renders are interruptible
+          });
+        }}
+      />
+      {isPending && <ActivityIndicator />}
+      <ResultsList data={results} />
     </>
   );
 }
 ```
 
-React Navigation 6+ integrates this natively via `freezeOnBlur` prop on `Screen`.
+### Suspense Boundaries for Code Splitting
 
-### Strategic Suspense Boundaries
+React Native supports `React.lazy` with Metro bundler for component-level code splitting. Wrap lazy-loaded components in Suspense boundaries to prevent the entire screen from blocking:
 
-Suspense boundaries serve two performance functions: code splitting (lazy imports) and data loading state. Place boundaries at the lowest level that makes UX sense — a boundary too high up forces a large skeleton, a boundary too low causes waterfall spinners.
+```tsx
+const HeavyChart = React.lazy(() => import('./HeavyChart'));
 
-Pattern: one boundary per "data region" (a card, a section, a screen), not one global boundary.
-
-### useDeferred Pattern for Heavy Computation
-
-For expensive synchronous work triggered by user input, defer it a tick to keep the input responsive:
-
-```js
-function useDeferred<T>(value: T, delay = 0): T {
-  const [deferred, setDeferred] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setDeferred(value), delay);
-    return () => clearTimeout(id);
-  }, [value, delay]);
-  return deferred;
+function AnalyticsScreen() {
+  return (
+    <View>
+      <Header />
+      <Suspense fallback={<ChartSkeleton />}>
+        <HeavyChart />
+      </Suspense>
+    </View>
+  );
 }
-
-// Usage: search input stays snappy, filter runs after 150ms idle
-const deferredQuery = useDeferred(query, 150);
-const results = useMemo(() => filterItems(items, deferredQuery), [items, deferredQuery]);
 ```
 
-React 18's `useDeferredValue` handles this natively when Concurrent Mode is available.
+### Error Boundaries Prevent Cascade Re-renders
 
-### Windowed Rendering for Tall Non-List Content
+An unhandled error in a child component causes React to unmount and remount the entire subtree up to the nearest error boundary. Without boundaries, a transient error in a card component can trigger a full-screen remount. Place error boundaries at the route/screen level at minimum, and at the widget level for independently failing UI sections.
 
-Not all tall content is a list. Profile pages, dashboards, and feed items with heterogeneous structure don't map cleanly to FlatList. Options:
+### Compound Component Pattern for Forms
 
-1. **Chunk rendering**: render sections progressively using `useEffect` and state flags
-2. **SectionList with getItemLayout**: provides O(1) scroll position computation
-3. **Custom RecyclerListView**: low-level recycling for fully custom layouts
+Large form components with many conditional fields become slow when the entire form re-renders on each keystroke. The compound component pattern isolates re-renders to individual fields:
 
-### Compound Component Pattern
-
-Reduces prop drilling (which forces intermediate components to re-render) by sharing context internally:
-
-```js
-const CardContext = createContext(null);
-
-function Card({ children, onPress }) {
-  const ctx = useMemo(() => ({ onPress }), [onPress]);
-  return <CardContext.Provider value={ctx}>{children}</CardContext.Provider>;
-}
-
-Card.Title = function Title({ children }) {
-  return <Text>{children}</Text>; // reads context only if needed
-};
-
-Card.Action = function Action({ label }) {
-  const { onPress } = useContext(CardContext);
-  return <Pressable onPress={onPress}><Text>{label}</Text></Pressable>;
-};
+```tsx
+// Each Field subscribes only to its own value via internal context
+<Form onSubmit={handleSubmit}>
+  <Form.Field name="email" component={EmailInput} />
+  <Form.Field name="password" component={PasswordInput} />
+  <Form.Submit label="Sign In" />
+</Form>
 ```
 
-Intermediate `Card` sub-components don't re-render unless their own props change.
+Libraries like `react-hook-form` implement this pattern — input changes do not re-render sibling fields.
 
 ---
 
-## 4. Build & Release Optimizations
+## 5. Build Optimizations
 
 ### Hermes Bytecode Precompilation
 
-Hermes compiles JavaScript to bytecode at build time rather than at runtime. This eliminates the JIT warm-up cost that V8/JSC incur on first launch. On Android this is the default since RN 0.64. On iOS since RN 0.70.
+Hermes compiles JavaScript to bytecode at build time rather than at runtime on the device. This moves JIT compilation cost from app startup to CI/CD. Hermes is enabled by default in React Native 0.70+.
 
-Verify Hermes is active:
+**Measured impact**: 20-40% reduction in TTI (Time to Interactive) vs JSC.
 
-```js
+Verify it is running:
+
+```tsx
 import { HermesInternal } from 'global';
-console.log(!!HermesInternal); // true = Hermes is running
+const isHermes = () => !!HermesInternal;
 ```
 
-Do not disable Hermes for "compatibility" reasons without benchmarking — the startup improvement is typically 20–40%.
+### Inline Requires (Lazy Module Loading)
 
-### ProGuard / R8 Rules for Android
+Metro supports `inlineRequires` — modules are not evaluated until their first `require()` call during runtime, rather than all being evaluated at startup.
 
-R8 (the modern replacement for ProGuard) performs dead code elimination, name minification, and class merging. For React Native apps this can reduce APK size by 20–40%.
+```js
+// metro.config.js
+module.exports = {
+  transformer: {
+    getTransformOptions: async () => ({
+      transform: {
+        inlineRequires: true,
+      },
+    }),
+  },
+};
+```
 
-```groovy
+Combined with Hermes: **42% TTI reduction** measured in production (3.6s to 2.1s).
+
+### ProGuard/R8 for Android
+
+R8 (the successor to ProGuard) minifies, shrinks, and obfuscates the Android APK. For React Native apps with many Java/Kotlin dependencies, typical result is 50-70% APK size reduction.
+
+```gradle
 // android/app/build.gradle
 buildTypes {
-  release {
-    minifyEnabled true
-    shrinkResources true
-    proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-  }
+    release {
+        minifyEnabled true
+        shrinkResources true
+        proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+    }
 }
 ```
 
-Common rules to add in `proguard-rules.pro`:
+### AAB Format Over APK
 
-```
-# Keep React Native JS interface classes
--keep class com.facebook.react.** { *; }
--keepclassmembers class * { @com.facebook.react.uimanager.annotations.ReactProp *; }
-```
-
-### Android App Bundle (AAB) over APK
-
-AAB allows Google Play to serve only the device-relevant native libraries, screen densities, and language resources. This reduces install size by 15–20% compared to a universal APK without any code change.
+Android App Bundle (AAB) lets Google Play deliver device-specific APKs — only the ABI, screen density, and language assets needed by the specific device are downloaded. Result: ~30% smaller download size for end users.
 
 ```bash
 cd android && ./gradlew bundleRelease
 ```
 
-### App Thinning on iOS
+Use `bundleRelease` instead of `assembleRelease` for Play Store submissions.
 
-Xcode's App Thinning includes:
-- **Slicing**: delivers only assets for the target device's screen scale and architecture
-- **Bitcode**: allows Apple to recompile for new instruction sets (deprecated in Xcode 14, use only for older targets)
-- **On-Demand Resources**: defer large assets (sounds, levels) until needed
+### EAS Update for OTA Delta Updates
 
-Ensure asset catalogs (`.xcassets`) are used instead of bundled files so the slicer can operate.
+Expo Application Services (EAS) Update delivers only the changed JS bundle delta, not the full bundle:
+- Full bundle: 3-8 MB download
+- Delta update: 50-200 KB download
 
-### OTA Updates: CodePush / EAS Update
+This results in 10-20x smaller OTA updates and dramatically faster update adoption across your user base.
 
-Ship JS bundle updates without App Store review. Best practices:
+### Asset Optimization Checklist
 
-- Use **mandatory** updates only for critical bug fixes; optional for features
-- Split the bundle with Metro's `--bundle-output` for partial replacement
-- EAS Update supports **branch channels**: `preview`, `staging`, `production`
-- Track update adoption rates; always maintain a rollback channel
-
-### Selective Native Module Inclusion
-
-Every native module you include (whether used or not) adds to binary size and startup time because the module registry is initialized at launch.
-
-Audit your `package.json` and `Podfile` annually:
-- Remove unused `react-native-*` packages entirely
-- For Android, use the `autolink` exclusion list in `react-native.config.js`
-
-### Removing Unused Pods / Gradle Dependencies
-
-```bash
-# iOS: audit what's linked
-cd ios && pod deintegrate && pod install
-# Then review Podfile.lock for unexpected large pods
-
-# Android: check dependency tree
-cd android && ./gradlew dependencies --configuration releaseRuntimeClasspath
-```
+- Convert PNG/JPEG to **WebP** (25-35% smaller, hardware-decoded on Android)
+- Use **.lottie** format (binary Lottie) instead of JSON — up to 90% smaller Lottie files
+- **Font subsetting**: include only the Unicode ranges your app uses (tools: `pyftsubset`, `glyphhanger`)
+- Enable **asset hashing** in Metro for long-term CDN caching
+- Use `@2x` and `@3x` image variants — React Native selects the correct density automatically
 
 ---
 
-## 5. Expo-Specific Optimizations
+## 6. Performance Testing in CI/CD
 
-### expo-image vs React Native Image
+### Reassure — Render Time Regression Testing
 
-`expo-image` is a production-grade image component backed by SDWebImage (iOS) and Glide (Android). Key advantages over the built-in `Image`:
-
-- Supports WebP and AVIF out of the box (30–50% smaller than JPEG/PNG)
-- Built-in memory + disk LRU cache with configurable policies
-- `placeholder` with blurhash for instant perceived load
-- Transition animations without JS bridge involvement
-
-```js
-import { Image } from 'expo-image';
-
-<Image
-  source={{ uri: imageUrl }}
-  placeholder={blurHash}
-  contentFit="cover"
-  transition={200}
-  cachePolicy="memory-disk"
-/>
-```
-
-### Expo Router Lazy Loading
-
-Expo Router uses React Navigation under the hood but adds automatic route-based code splitting. Each route file becomes a separate JS chunk loaded on demand.
-
-To ensure lazy loading works correctly:
-- Do not import heavy screens at the layout level
-- Use dynamic `import()` for large third-party components inside screens
-- Set `initialRouteName` to load only the entry screen's chunk at startup
-
-### EAS Build Optimizations
-
-- Use **EAS Build cache** (`cache.key` in `eas.json`) to avoid re-running CocoaPods install and Gradle dependency resolution on every CI run
-- Pin `node`, `yarn`/`npm`, and Xcode versions in `eas.json` to prevent cache invalidation from version drift
-- Use `EXPO_NO_DOTENV=1` in CI to prevent accidental `.env` inclusion
-
-### Dev Build vs Expo Go
-
-Expo Go ships with a superset of native modules to support all possible SDK features. A custom dev build includes only the modules your app actually uses. This makes Metro bundling 3–5x faster and makes the running app behavior identical to production.
-
-Migrate to dev builds once your app has any custom native dependency:
+Reassure measures React component render time and flags regressions in pull requests. It runs as part of your test suite.
 
 ```bash
-eas build --profile development --platform ios
+npm install --save-dev reassure
 ```
 
-### Expo Modules API for Custom Native Modules
+```tsx
+// __tests__/ProductList.perf-test.tsx
+import { measurePerformance } from 'reassure';
 
-The Expo Modules API generates Turbo Module-compatible bridges automatically. This is faster to write than raw TurboModule JSI, handles Swift/Kotlin type conversions, and is compatible with both Old and New Architecture.
+test('ProductList renders efficiently', async () => {
+  await measurePerformance(<ProductList items={mockItems} />);
+});
+```
+
+Reassure generates a performance report comparing `main` vs the PR branch. Integrate with Danger or GitHub Actions to comment the diff on each PR.
+
+### Flashlight — Automated Android Benchmarks
+
+Flashlight wraps Android's `perfetto` tracing and provides a CLI for automated performance measurement:
+
+```bash
+npx @perf-tools/flashlight measure --apk MyApp.apk --test e2e/scroll.js
+```
+
+Outputs: FPS, frame time percentiles, CPU/GPU usage. Runs in CI against real or emulated devices.
+
+### Maestro — UI Performance Testing
+
+Maestro drives your app via YAML flow files and can measure screen-to-screen transition times:
+
+```yaml
+# flows/home-to-detail.yaml
+appId: com.myapp
+---
+- launchApp
+- tapOn: "Product Card"
+- assertVisible: "Product Detail Screen"
+```
+
+Combine with Flashlight to capture frame data during the Maestro flow.
+
+### Bundle Size Tracking Per PR
+
+Track JS bundle size as a CI metric:
+
+```bash
+npx react-native bundle --platform android --dev false --entry-file index.js \
+  --bundle-output /tmp/bundle.js && wc -c /tmp/bundle.js
+```
+
+Set a budget (e.g., fail CI if bundle exceeds 3 MB) and report size delta per PR using the `bundlesize` package or a simple shell threshold check.
 
 ---
 
-## 6. Performance Testing & CI/CD
+## 7. Platform-Specific Profiling
 
-### Reassure (Render Regression Testing)
+### iOS: Instruments Time Profiler
 
-Reassure by Callstack measures the render time and render count of components over a statistical sample. It integrates with Jest and produces a JSON report comparing the current branch to the baseline.
+Instruments ships with Xcode and is the authoritative iOS performance tool. For React Native:
 
-```bash
-npx reassure check
-```
+1. Build a release scheme in Xcode (`Product > Scheme > Edit Scheme > Run > Release`)
+2. Open Instruments (`Xcode > Open Developer Tool > Instruments`)
+3. Select **Time Profiler** — shows CPU time per call stack
+4. Select **Core Animation** — shows frame rate and dropped frames
 
-Add to CI to catch regressions before merge. A component that re-renders 3x when it should render 1x will be flagged automatically.
+Look for JS thread CPU spikes that correlate with frame drops in Core Animation.
 
-### Flashlight (Automated Android Benchmarks)
+### iOS: MetricKit for Production Telemetry
 
-Flashlight runs on a real Android device via ADB and measures FPS, thread CPU, and memory during scripted user flows. Unlike Perfetto/Systrace, it produces a normalized score usable in CI comparisons.
+MetricKit (iOS 13+) delivers aggregate performance metrics from real user devices via the App Store. Access via App Store Connect or by implementing the `MXMetricManagerSubscriber` protocol in your AppDelegate.
 
-```bash
-npx @perf-profiler/cli measure --testName "scroll-feed" --duration 5000
-```
+Key metrics to monitor: `MXAppLaunchDiagnostic`, `MXHangDiagnostic` (JS thread blocking), `MXCPUMetric`.
 
-### Maestro for UI Performance Flows
+### Android: GPU Overdraw Detection
 
-Maestro records and replays user flows. Combine with Flashlight to measure performance of specific user journeys (app launch, scroll, checkout) consistently across builds.
+Enable overdraw visualization in Developer Options: `Developer Options > Debug GPU overdraw > Show overdraw areas`.
 
-### Custom Performance Markers
+- Blue = 1x overdraw (acceptable)
+- Green = 2x
+- Pink = 3x
+- Red = 4x+ (investigate)
 
-Use `react-native-performance` to emit named marks and measures that appear in Systrace and Instruments:
+Common React Native overdraw culprits: nested Views with `backgroundColor`, `ImageBackground` with tinted overlay, status bar background duplication.
 
-```js
-import performance from 'react-native-performance';
-
-performance.mark('FeedListStart');
-// ... render feed
-performance.measure('FeedListRender', 'FeedListStart');
-```
-
-Track Time-to-Interactive (TTI) from app launch to first meaningful interaction.
-
-### CI Bundle Size Tracking
-
-Add a size-check step to your CI pipeline:
+### Android: systrace
 
 ```bash
-npx react-native bundle --platform android --dev false --bundle-output /tmp/bundle.js
-wc -c /tmp/bundle.js
-# Compare to threshold or previous PR value
+python $ANDROID_HOME/platform-tools/systrace/systrace.py \
+  --time=5 -o trace.html gfx view res
 ```
 
-Use tools like `bundlesize` or a simple shell script to fail the build if the bundle grows beyond an accepted threshold.
+Open `trace.html` in Chrome at `chrome://tracing`. Look for `Choreographer#doFrame` duration — anything over 16ms causes a dropped frame.
 
-### Startup Trace Analysis
+### 120Hz Frame Budget
 
-- **Android**: `adb shell am start -S -W com.yourapp/.MainActivity` measures cold start. Use Perfetto for detailed systrace.
-- **iOS**: Instruments → App Launch template gives a flame chart from pre-main to first frame.
+On ProMotion displays (iPhone 13 Pro+, many Android flagships), the frame budget is **8.33ms**, not 16.67ms. A component that just barely fits the 60Hz budget will drop frames on 120Hz devices.
 
-Key phases to measure: pre-main (native init), JS engine start, Metro bundle execution, first React render, first native frame.
+React Native does not currently render at 120Hz by default. To enable on iOS experimentally:
+
+```objc
+// AppDelegate.mm
+RCTSetFrameRate(120);
+```
+
+Verify your JS workload can sustain the tighter budget before shipping to users.
 
 ---
 
-## 7. Real-World Case Studies (Summary)
+## 8. Case Studies
 
-### Shopify — FlashList (2022)
+### Shopify: Sub-500ms P75 Screen Loads
 
-Shopify's Restyle team replaced FlatList with a purpose-built recycling list (FlashList). Result: **7.5x improvement in JS thread FPS** on the Shopify mobile app's product listing screen. The key insight: FlatList's virtualizer has a JS-side item pool, while FlashList pushes recycling to a native-aware scheduler.
+Shopify's mobile team published benchmarks showing P75 screen load times under 500ms across their React Native app after:
 
-Published paper and benchmark suite available at `shopify.github.io/flash-list`.
+- Migrating all long lists to FlashList (which they created)
+- Adopting Hermes with `inlineRequires: true`
+- Implementing per-screen Suspense boundaries with skeleton screens
+- 86% code shared between iOS and Android
 
-### Coinbase — New Architecture Migration (2023)
+FlashList was created internally at Shopify to solve FlatList performance for their product catalog and open-sourced in 2022.
 
-Coinbase Wallet migrated from the Old Architecture (asynchronous bridge) to Fabric + TurboModules. Result: **55% reduction in startup time**, measured as time from user tap to first interactive frame. The primary gain came from eliminating bridge serialization overhead during module initialization.
+### Coinbase: Near-Native Performance After Migration
 
-### Discord — Memory Optimization (2021)
+Coinbase migrated from native-per-platform to React Native and documented near-native performance for their core trading screens. Key decisions:
 
-Discord audited image caching and found unbounded in-memory caches from `react-native-fast-image` combined with no eviction policy. After implementing LRU eviction and switching to compressed texture formats: **40% reduction in OOM crashes** on mid-range Android devices.
+- Full New Architecture adoption (Fabric + TurboModules) from the start
+- Custom native modules for cryptographic operations (never in JS)
+- Gesture handling with react-native-gesture-handler (native thread)
 
-### Bloomberg — Hermes Migration (2020)
+### Bloomberg: Dual Platform in 5 Months
 
-Bloomberg Terminal app migrated from JSC to Hermes. Result: **26% reduction in memory usage** and significantly improved garbage collection pause times. Hermes's compact bytecode format and register-based VM reduced heap pressure compared to JSC's tree-walking interpreter.
+Bloomberg built their consumer app for both iOS and Android in 5 months with a small team using React Native. Performance parity with their native app was achieved by:
 
-### Meta — Fabric + TurboModules on Large Screens (2022)
+- Keeping data transformation in native modules
+- Using native navigation (not JS stack)
+- Offloading chart rendering to a native WebGL view
 
-Meta's internal apps using Fabric with concurrent rendering showed **20% improvement in render throughput** on large-screen Android devices (tablets, foldables) where layout complexity is highest. The synchronous native commit in Fabric eliminated a class of frame drops caused by bridge batching delays.
+### Measured: Hermes + inlineRequires = 42% TTI Reduction
 
----
+A production measurement from a mid-size e-commerce app:
 
-## Quick Reference Checklist
+| Metric | Before | After | Delta |
+|---|---|---|---|
+| TTI (P50) | 3.6s | 2.1s | -42% |
+| JS parse time | 1.2s | 0.3s | -75% |
+| Bundle size | 4.1 MB | 4.1 MB | 0% |
 
-### Before Shipping
-
-- [ ] Hermes enabled on both platforms
-- [ ] `console.log` stripped via Babel plugin
-- [ ] Flipper removed from release builds
-- [ ] ProGuard/R8 enabled on Android
-- [ ] AAB used for Play Store submissions
-- [ ] Release build profiled (not dev)
-- [ ] Bundle size tracked in CI
-- [ ] Images served as WebP/AVIF
-
-### Before Every Render-Heavy Feature
-
-- [ ] New list component uses FlashList with `estimatedItemSize`
-- [ ] List items wrapped in `React.memo`
-- [ ] Callbacks in list items wrapped in `useCallback`
-- [ ] No `key={index}` in dynamic lists
-- [ ] No FlatList nested inside ScrollView
-- [ ] Animations use `useNativeDriver: true`
-- [ ] No layout properties animated (only `transform` + `opacity`)
-
-### Before Every Navigation Screen
-
-- [ ] Screen is lazily loaded
-- [ ] Offscreen tabs use `freezeOnBlur` or `react-freeze`
-- [ ] Heavy data fetching deferred until screen is focused
-- [ ] Navigation state not stored in global monolithic context
+The combination of Hermes bytecode precompilation and `inlineRequires: true` deferred loading of non-critical modules until after first render. No UI or logic changes were made.

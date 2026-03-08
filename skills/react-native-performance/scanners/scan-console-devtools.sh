@@ -1,0 +1,173 @@
+#!/bin/bash
+# Console & DevTools Scanner
+DIR="${1:-./src}"
+ISSUES=0
+
+echo "Console & DevTools Scanner"
+echo "================================"
+
+# console.log without __DEV__ guard
+echo ""
+echo "--- console.log Without __DEV__ Guard ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'console\.log(' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | grep -v '__DEV__' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      prev_line=$(sed -n "$((lineno > 1 ? lineno - 1 : 1))p" "$file" 2>/dev/null)
+      if ! echo "$prev_line" | grep -q '__DEV__\|if.*DEV'; then
+        echo "$file:$lineno — [WARN] console.log without __DEV__ guard → Wrap with if (__DEV__) or use babel-plugin-transform-remove-console"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
+# console.warn without __DEV__ guard
+echo ""
+echo "--- console.warn Without __DEV__ Guard ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'console\.warn(' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | grep -v '__DEV__' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      prev_line=$(sed -n "$((lineno > 1 ? lineno - 1 : 1))p" "$file" 2>/dev/null)
+      if ! echo "$prev_line" | grep -q '__DEV__\|if.*DEV'; then
+        echo "$file:$lineno — [WARN] console.warn without __DEV__ guard → Wrap with if (__DEV__) or suppress in production logger"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
+# console.error without __DEV__ guard (informational — may be intentional for crash reporting)
+echo ""
+echo "--- console.error Without __DEV__ Guard ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'console\.error(' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | grep -v '__DEV__\|Sentry\|crashlytics\|bugsnag' \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      echo "$file_loc — [INFO] console.error in production code → Use a crash reporting SDK (Sentry/Crashlytics) instead of console.error"
+      ISSUES=$((ISSUES + 1))
+    done
+
+# console.info / console.debug without __DEV__ guard
+echo ""
+echo "--- console.info / console.debug Without __DEV__ Guard ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'console\.info(\|console\.debug(' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      echo "$file_loc — [WARN] console.info/debug in production code → Remove or guard with if (__DEV__)"
+      ISSUES=$((ISSUES + 1))
+    done
+
+# debugger statements
+echo ""
+echo "--- debugger Statements ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  '\bdebugger\b' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      echo "$file_loc — [ERROR] debugger statement left in code → Remove immediately; pauses JS execution in production"
+      ISSUES=$((ISSUES + 1))
+    done
+
+# Flipper imports
+echo ""
+echo "--- Flipper Imports ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  "from 'react-native-flipper'\|require('react-native-flipper')\|from \"react-native-flipper\"\|addPlugin\|FlipperPlugin" \
+  "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | grep -v '__DEV__\|debug\|Debug' \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      echo "$file_loc — [WARN] Flipper import outside __DEV__ guard → Wrap Flipper initialization in if (__DEV__) to exclude from production bundle"
+      ISSUES=$((ISSUES + 1))
+    done
+
+# TODO comments
+echo ""
+echo "--- TODO Comments ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'TODO\|todo:' "$DIR" 2>/dev/null \
+  | grep -v node_modules \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      echo "$file_loc — [INFO] TODO comment → Track as a ticket or resolve before release"
+      ISSUES=$((ISSUES + 1))
+    done
+
+# FIXME comments
+echo ""
+echo "--- FIXME Comments ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'FIXME\|fixme:' "$DIR" 2>/dev/null \
+  | grep -v node_modules \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      echo "$file_loc — [WARN] FIXME comment → Known issue that must be resolved; do not ship to production"
+      ISSUES=$((ISSUES + 1))
+    done
+
+# HACK comments
+echo ""
+echo "--- HACK Comments ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  '\bHACK\b\|hack:' "$DIR" 2>/dev/null \
+  | grep -v node_modules \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      echo "$file_loc — [WARN] HACK comment → Temporary workaround detected; document the issue and plan proper fix"
+      ISSUES=$((ISSUES + 1))
+    done
+
+# Production-critical logic inside __DEV__ blocks (anti-pattern)
+echo ""
+echo "--- Production Logic Inside __DEV__ Block ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'if\s*(__DEV__)' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      context=$(sed -n "${lineno},$((lineno + 10))p" "$file" 2>/dev/null)
+      if echo "$context" | grep -q 'navigate\|dispatch\|setState\|fetch(\|api\.'; then
+        echo "$file:$lineno — [WARN] Production-critical logic inside __DEV__ block → State changes/navigation inside __DEV__ blocks will not run in production; this may be a bug"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
+# Hardcoded localhost / dev URLs
+echo ""
+echo "--- Hardcoded localhost / Dev URLs ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'localhost\|127\.0\.0\.1\|192\.168\.' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | grep -v '__DEV__\|//.*localhost\|config\|\.env' \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      echo "$file_loc — [ERROR] Hardcoded local/dev URL → Use environment variables (process.env / Config) for API base URLs"
+      ISSUES=$((ISSUES + 1))
+    done
+
+# React Profiler without __DEV__ guard
+echo ""
+echo "--- React Profiler Without __DEV__ Guard ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'ReactDevTools\|enableProfiling\|<Profiler ' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | grep -v '__DEV__' \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      echo "$file_loc — [WARN] React Profiler/DevTools without __DEV__ guard → Profiling adds overhead; wrap with if (__DEV__) or remove from production builds"
+      ISSUES=$((ISSUES + 1))
+    done
+
+echo ""
+echo "Console & DevTools scan complete."

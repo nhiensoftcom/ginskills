@@ -553,3 +553,697 @@ GET /posts/:id
 - List endpoints: < 50 KB per page
 - Detail endpoints: < 100 KB
 - Image URLs, not image data (never base64 encode images in API responses)
+
+---
+
+## GraphQL Performance
+
+### Cache Directives and Cache-First Strategies
+
+Apollo Client's `fetchPolicy` controls whether a query hits the network or the in-memory cache. Choosing the wrong policy for a query type is the most common GraphQL performance mistake.
+
+```ts
+// Prefer cache for stable data — zero network latency
+useQuery(GET_USER_PROFILE, {
+  fetchPolicy: 'cache-first', // read from cache; only fetch if not cached
+});
+
+// Prefer cache but sync in background for frequently updated data
+useQuery(GET_FEED, {
+  fetchPolicy: 'cache-and-network', // return cache immediately, refetch silently
+});
+
+// Always fetch — for data that must always be fresh (e.g., payment state)
+useQuery(GET_ORDER_STATUS, {
+  fetchPolicy: 'network-only',
+});
+```
+
+| Policy | Cache Read | Network Request | Use When |
+|---|---|---|---|
+| `cache-first` | Yes | Only if cache miss | Stable reference data (categories, config) |
+| `cache-and-network` | Yes (instant) | Always (background) | Feeds, lists that change periodically |
+| `network-only` | No | Always | Payment, order status, auth state |
+| `cache-only` | Yes | Never | Fully offline mode |
+| `no-cache` | No | Always, no write | Ephemeral queries (search suggestions) |
+
+### Persisted Queries for Reduced Payload
+
+With automatic persisted queries (APQ), the client sends a hash of the query string instead of the full query text. On cache hit the server responds immediately with no query parsing cost.
+
+```ts
+import { ApolloClient, InMemoryCache, HttpLink } from '@apollo/client';
+import { createPersistedQueryLink } from '@apollo/client/link/persisted-queries';
+import { sha256 } from 'crypto-hash';
+
+const persistedQueriesLink = createPersistedQueryLink({ sha256 });
+const httpLink = new HttpLink({ uri: '/graphql' });
+
+const client = new ApolloClient({
+  link: persistedQueriesLink.concat(httpLink),
+  cache: new InMemoryCache(),
+});
+// First request: sends full query + hash → server caches hash
+// Subsequent requests: sends hash only (~50 bytes vs 500+ bytes)
+```
+
+### Request Batching with Apollo Link
+
+Batch multiple queries fired in the same tick into a single HTTP request.
+
+```ts
+import { BatchHttpLink } from '@apollo/client/link/batch-http';
+
+const batchLink = new BatchHttpLink({
+  uri: '/graphql',
+  batchMax: 10,          // max operations per batch
+  batchInterval: 20,     // wait up to 20ms to collect operations
+});
+
+const client = new ApolloClient({
+  link: batchLink,
+  cache: new InMemoryCache(),
+});
+// 5 useQuery calls in one render → 1 HTTP request with 5 operations
+```
+
+Batching trades latency (up to 20ms wait) for throughput. Disable for latency-sensitive mutations.
+
+### InMemoryCache Tuning
+
+```ts
+const cache = new InMemoryCache({
+  typePolicies: {
+    Query: {
+      fields: {
+        // Cursor-based feed: merge incoming pages rather than replacing
+        feed: {
+          keyArgs: ['filter'],  // separate caches per filter, ignore cursor arg
+          merge(existing = { items: [], nextCursor: null }, incoming) {
+            return {
+              ...incoming,
+              items: [...existing.items, ...incoming.items],
+            };
+          },
+          read(existing) {
+            return existing;
+          },
+        },
+      },
+    },
+    // Use a stable unique key when the default `id` field is absent
+    Product: {
+      keyFields: ['sku'],
+    },
+    // Singleton types with no id — store as single cache entry
+    AppConfig: {
+      keyFields: [],
+    },
+  },
+});
+```
+
+### Optimized Apollo Client Setup
+
+```ts
+// lib/apollo-client.ts
+import {
+  ApolloClient,
+  InMemoryCache,
+  ApolloLink,
+  HttpLink,
+} from '@apollo/client';
+import { RetryLink } from '@apollo/client/link/retry';
+import { createPersistedQueryLink } from '@apollo/client/link/persisted-queries';
+import { sha256 } from 'crypto-hash';
+
+const retryLink = new RetryLink({
+  delay: { initial: 300, max: 10_000, jitter: true },
+  attempts: { max: 3, retryIf: error => !!error },
+});
+
+const persistedLink = createPersistedQueryLink({ sha256 });
+
+const httpLink = new HttpLink({
+  uri: process.env.EXPO_PUBLIC_GRAPHQL_URL,
+  headers: { 'Accept-Encoding': 'gzip' },
+});
+
+export const apolloClient = new ApolloClient({
+  link: ApolloLink.from([retryLink, persistedLink, httpLink]),
+  cache: new InMemoryCache({
+    typePolicies: {
+      /* ... type policies here ... */
+    },
+  }),
+  defaultOptions: {
+    watchQuery: {
+      fetchPolicy: 'cache-and-network',
+      nextFetchPolicy: 'cache-first', // degrade to cache-first after first fetch
+    },
+  },
+});
+```
+
+---
+
+## gRPC / Protobuf for Mobile
+
+### Binary Serialization Benefits vs JSON
+
+Protobuf encodes data as binary rather than human-readable text. The savings are significant at scale.
+
+| Metric | JSON | Protobuf | Improvement |
+|---|---|---|---|
+| Payload size (typical response) | 1,200 bytes | 180–280 bytes | ~5–7x smaller |
+| Parse time (1,000 items) | ~8 ms | ~1.2 ms | ~6x faster |
+| Serialization time | ~6 ms | ~0.8 ms | ~7x faster |
+| Schema enforcement | None (runtime) | Compile-time | Stronger |
+| Human-readable | Yes | No | — |
+
+Rule of thumb: protobuf payloads are **2–10x smaller** than equivalent JSON depending on field types and string density.
+
+### Code Generation from .proto Files
+
+```proto
+// proto/product.proto
+syntax = "proto3";
+
+package product;
+
+message Product {
+  string id = 1;
+  string name = 2;
+  double price = 3;
+  repeated string image_urls = 4;
+}
+
+message ListProductsResponse {
+  repeated Product products = 1;
+  string next_cursor = 2;
+}
+```
+
+Generate TypeScript types and client stubs:
+
+```bash
+npx protoc \
+  --plugin=protoc-gen-ts_proto=./node_modules/.bin/protoc-gen-ts_proto \
+  --ts_proto_out=./src/generated \
+  --ts_proto_opt=outputServices=grpc-js \
+  --proto_path=./proto \
+  ./proto/product.proto
+```
+
+### Streaming RPC Patterns for Real-Time
+
+gRPC supports four communication patterns. Server-streaming is the most useful for mobile real-time feeds.
+
+```ts
+// Server-streaming RPC — server pushes updates, client reads
+const stream = productServiceClient.watchInventory({ productId });
+
+stream.on('data', (update: InventoryUpdate) => {
+  setStock(update.availableStock);
+});
+
+stream.on('error', err => {
+  console.error('Stream error:', err);
+  scheduleReconnect();
+});
+
+stream.on('end', () => {
+  // server closed the stream — reconnect if unexpected
+});
+
+// Clean up on unmount
+return () => stream.cancel();
+```
+
+| Pattern | Direction | Use Case |
+|---|---|---|
+| Unary | Client → Server (once) | Standard CRUD requests |
+| Server streaming | Server → Client (many) | Live feeds, stock updates |
+| Client streaming | Client → Server (many) | File uploads, telemetry |
+| Bidirectional | Both (many) | Chat, collaborative editing |
+
+### When to Use gRPC vs REST in React Native
+
+| Factor | gRPC | REST/JSON |
+|---|---|---|
+| Payload size matters | Strongly preferred | Acceptable with gzip |
+| Real-time streaming | Native support | Requires SSE or WebSocket |
+| Team familiarity | Steep learning curve | Universal |
+| Browser compatibility | Requires grpc-web proxy | Native |
+| Tooling maturity in RN | Limited (use `grpc-web`) | Excellent |
+| Schema enforcement | Compile-time (.proto) | Runtime (Zod, yup) |
+
+**Recommendation**: use gRPC between backend microservices where payload size and throughput matter most. For React Native, prefer REST or GraphQL unless you control the full stack and need streaming or extreme payload efficiency.
+
+---
+
+## SSE vs WebSocket Trade-offs
+
+### SSE for Read-Only Push
+
+Server-Sent Events (SSE) use a plain HTTP connection the server keeps open, pushing text events. The browser (and React Native) handle reconnection automatically.
+
+Advantages over WebSocket for read-only streams:
+- Single HTTP/2 connection — multiplexed with other requests
+- Automatic reconnection built into the `EventSource` protocol
+- Works through HTTP proxies and firewalls that block WebSocket upgrades
+- Lower server resource cost (no protocol upgrade handshake)
+
+### EventSource API in React Native
+
+React Native does not ship a native `EventSource`. Use the `react-native-sse` package or a polyfill.
+
+```ts
+import EventSource from 'react-native-sse';
+
+function useLivePrice(productId: string) {
+  const [price, setPrice] = useState<number | null>(null);
+
+  useEffect(() => {
+    const es = new EventSource(
+      `${API_BASE}/products/${productId}/price-stream`,
+      { headers: { Authorization: `Bearer ${getToken()}` } }
+    );
+
+    es.addEventListener('price-update', (event: MessageEvent) => {
+      const { price } = JSON.parse(event.data);
+      setPrice(price);
+    });
+
+    es.addEventListener('error', () => {
+      // EventSource retries automatically after 3s by default
+      // Server controls retry interval via `retry: <ms>` in the event stream
+    });
+
+    return () => es.close();
+  }, [productId]);
+
+  return price;
+}
+```
+
+### Code Example: SSE vs WebSocket
+
+```ts
+// SSE — server pushes, client reads only
+const es = new EventSource('/api/notifications/stream');
+es.onmessage = event => handleNotification(JSON.parse(event.data));
+// reconnects automatically on drop
+
+// WebSocket — bidirectional, client also sends
+const ws = new WebSocket('wss://api.example.com/ws');
+ws.onopen = () => ws.send(JSON.stringify({ type: 'subscribe', topic: 'notifications' }));
+ws.onmessage = event => handleNotification(JSON.parse(event.data));
+ws.onclose = () => scheduleReconnect(); // must implement manually
+```
+
+### Decision Table
+
+| Factor | SSE | WebSocket |
+|---|---|---|
+| Data direction | Server → Client only | Bidirectional |
+| Protocol | HTTP/1.1 or HTTP/2 | Separate WS protocol |
+| Auto-reconnect | Yes (built-in) | No (manual) |
+| Proxy / firewall support | Excellent | Sometimes blocked |
+| Max connections (HTTP/1.1) | 6 per domain | Unlimited |
+| Max connections (HTTP/2) | Unlimited (multiplexed) | Unlimited |
+| Binary data | No (text only) | Yes |
+| Overhead per message | Low | Low |
+| Server resource cost | Lower | Higher |
+| **Best for** | Notifications, live feeds, dashboards | Chat, multiplayer, collaborative editing |
+
+**Rule**: default to SSE for any read-only server push. Only upgrade to WebSocket when the client must also send frequent messages.
+
+---
+
+## Background Sync Patterns
+
+### Android WorkManager Queue Patterns
+
+WorkManager schedules deferrable background work that survives process death and device restart.
+
+```ts
+// Using @voximplant/react-native-background-fetch or
+// direct native module — example uses react-native-background-fetch
+
+import BackgroundFetch from 'react-native-background-fetch';
+
+// Register background task (call once on app start)
+BackgroundFetch.configure(
+  {
+    minimumFetchInterval: 15, // minutes — Android minimum is 15
+    stopOnTerminate: false,
+    startOnBoot: true,
+    requiredNetworkType: BackgroundFetch.NETWORK_TYPE_ANY,
+  },
+  async taskId => {
+    await syncPendingUploads();
+    BackgroundFetch.finish(taskId); // MUST call finish or OS kills the app
+  },
+  taskId => {
+    // timeout — finish immediately
+    BackgroundFetch.finish(taskId);
+  }
+);
+```
+
+For fine-grained WorkManager control (constraints, tags, chaining), write a native module or use `@notifee/react-native` background handlers.
+
+### iOS BackgroundTasks Framework
+
+```ts
+// iOS BGProcessingTask — for longer sync tasks (up to 30s)
+// Register in AppDelegate.m:
+// BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.app.sync", ...)
+
+// From JS, schedule via BackgroundFetch (wraps BGAppRefreshTask):
+BackgroundFetch.scheduleTask({
+  taskId: 'com.app.sync',
+  delay: 0,                         // run as soon as possible
+  periodic: false,                  // one-shot
+  requiresNetworkConnectivity: true,
+  requiresCharging: false,
+});
+```
+
+iOS restricts background execution aggressively. The OS decides when to actually run the task based on battery, usage patterns, and device state — do not rely on exact timing.
+
+### Sync Tag Deduplication
+
+When multiple offline mutations target the same resource, deduplicate before syncing to avoid redundant requests.
+
+```ts
+type PendingSync = {
+  tag: string;       // unique key, e.g. `post:${id}:like`
+  payload: unknown;
+  timestamp: number;
+};
+
+function enqueueSyncTask(tag: string, payload: unknown) {
+  const existing = syncQueue.find(t => t.tag === tag);
+  if (existing) {
+    // replace the stale entry — only the latest state matters
+    Object.assign(existing, { payload, timestamp: Date.now() });
+  } else {
+    syncQueue.push({ tag, payload, timestamp: Date.now() });
+  }
+  persistQueue(syncQueue);
+}
+
+// Result: liking and unliking the same post while offline = 1 sync operation, not 2
+```
+
+### Exponential Backoff for Sync Retries
+
+```ts
+async function syncWithBackoff(
+  task: () => Promise<void>,
+  maxAttempts = 5,
+  baseDelay = 1_000
+): Promise<void> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      await task();
+      return; // success
+    } catch (err) {
+      if (attempt === maxAttempts - 1) throw err;
+
+      const delay = Math.min(baseDelay * 2 ** attempt, 30_000);
+      const jitter = Math.random() * 0.3 * delay; // ±30% jitter
+      await new Promise(resolve => setTimeout(resolve, delay + jitter));
+    }
+  }
+}
+// Delays: ~1s, ~2s, ~4s, ~8s, ~16s (capped at 30s)
+// Jitter prevents thundering herd when many devices reconnect simultaneously
+```
+
+### Background Sync Queue
+
+```ts
+// lib/sync-queue.ts
+import { MMKV } from 'react-native-mmkv';
+
+const storage = new MMKV({ id: 'sync-queue' });
+const QUEUE_KEY = 'pending_tasks';
+
+type SyncTask = {
+  tag: string;
+  url: string;
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  body: unknown;
+  attempts: number;
+};
+
+export function enqueue(task: Omit<SyncTask, 'attempts'>) {
+  const queue = getQueue();
+  const idx = queue.findIndex(t => t.tag === task.tag);
+  const entry: SyncTask = { ...task, attempts: 0 };
+  if (idx >= 0) queue[idx] = entry; else queue.push(entry);
+  storage.set(QUEUE_KEY, JSON.stringify(queue));
+}
+
+export function getQueue(): SyncTask[] {
+  const raw = storage.getString(QUEUE_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+export async function flushQueue() {
+  const queue = getQueue();
+  const remaining: SyncTask[] = [];
+
+  for (const task of queue) {
+    try {
+      await fetch(task.url, {
+        method: task.method,
+        body: JSON.stringify(task.body),
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch {
+      if (task.attempts < 5) {
+        remaining.push({ ...task, attempts: task.attempts + 1 });
+      }
+      // drop after 5 failures — surface error to user
+    }
+  }
+
+  storage.set(QUEUE_KEY, JSON.stringify(remaining));
+}
+```
+
+Wire `flushQueue` to the TanStack Query `onlineManager` listener so it runs automatically when connectivity restores.
+
+---
+
+## HTTP/2 & Network Optimization
+
+### HTTP/2 Multiplexing Benefits in React Native
+
+HTTP/1.1 opens one connection per request (browsers cap at 6 per domain). HTTP/2 multiplexes all requests over a single TCP connection with no head-of-line blocking at the application layer.
+
+| Metric | HTTP/1.1 | HTTP/2 |
+|---|---|---|
+| Connections per domain | 6 | 1 (multiplexed) |
+| Header compression | None | HPACK (60–90% reduction) |
+| Request prioritization | No | Yes |
+| Server push | No | Yes |
+| Typical latency reduction | — | 20–40% on mobile |
+
+React Native's `fetch` and `XMLHttpRequest` use the platform's native network stack (NSURLSession on iOS, OkHttp on Android), both of which support HTTP/2 automatically when the server advertises it via ALPN. No code changes needed — ensure your API server has HTTP/2 enabled.
+
+### Certificate Pinning Performance Impact
+
+Certificate pinning adds a hash comparison per TLS handshake (negligible CPU cost, ~0.1 ms). The real cost is **deployment risk**: a pinned certificate that expires or rotates without an app update breaks all network calls.
+
+```ts
+// Using react-native-ssl-pinning
+import { fetch as pinnedFetch } from 'react-native-ssl-pinning';
+
+const response = await pinnedFetch('https://api.example.com/data', {
+  method: 'GET',
+  sslPinning: {
+    certs: ['cert_sha256_hash_here'], // SHA-256 of the server's certificate
+  },
+});
+```
+
+Mitigation strategy: pin to the **intermediate CA certificate**, not the leaf. Intermediate CAs rotate less frequently. Ship two hashes (current + backup) to enable rotation without a forced update.
+
+### DNS Prefetching Strategies
+
+DNS resolution on mobile networks adds 50–300 ms on the first request to a new host. Warm up DNS before the user navigates.
+
+```ts
+// Android: use OkHttp's DNS prefetch via a native module
+// iOS: NSURLSession warms DNS automatically after first request
+
+// App-level: make a cheap HEAD request to critical domains on app start
+async function warmupDNS(hosts: string[]) {
+  await Promise.allSettled(
+    hosts.map(host =>
+      fetch(`https://${host}/health`, { method: 'HEAD' }).catch(() => {})
+    )
+  );
+}
+
+// Call in app root, before user reaches any screen that needs the API
+warmupDNS(['api.example.com', 'cdn.example.com', 'images.example.com']);
+```
+
+### Connection Pooling
+
+Both NSURLSession (iOS) and OkHttp (Android) maintain a connection pool by default. Keep connections alive by:
+
+- Using the same base URL for all API requests (no per-request base URL switching)
+- Setting `Connection: keep-alive` (default in HTTP/1.1 and HTTP/2)
+- Avoiding unnecessary TLS renegotiation (reuse the same `fetch` instance / Axios instance)
+
+```ts
+// Good — single Axios instance, reuses connection pool
+const apiClient = axios.create({ baseURL: process.env.EXPO_PUBLIC_API_URL });
+
+// Bad — new instance per request discards pooled connections
+function fetchSomething() {
+  return axios.create({ baseURL: '...' }).get('/endpoint');
+}
+```
+
+### Request Prioritization
+
+On congested mobile networks, request order matters. Fetch critical data first; defer analytics and telemetry.
+
+```ts
+// Priority 1 — above-the-fold content, blocks render
+const { data: feed } = useQuery({ queryKey: ['feed'], queryFn: fetchFeed });
+
+// Priority 2 — secondary content, load after feed
+const { data: recommendations } = useQuery({
+  queryKey: ['recommendations'],
+  queryFn: fetchRecommendations,
+  enabled: !!feed, // don't start until critical data is loaded
+});
+
+// Priority 3 — analytics, fire and forget, never block UI
+useEffect(() => {
+  if (feed) {
+    // defer with low priority
+    requestIdleCallback(() => logFeedImpression(feed));
+  }
+}, [feed]);
+```
+
+---
+
+## Pagination Performance
+
+### Cursor vs Offset Pagination
+
+| Factor | Offset (`LIMIT n OFFSET k`) | Cursor (keyset) |
+|---|---|---|
+| DB fetch complexity | O(n) — scans skipped rows | O(1) — seeks directly to position |
+| Stable across concurrent writes | No — inserts shift rows | Yes — anchored to a value |
+| Duplicates / skips on mutation | Yes | No |
+| Random page jump support | Yes | No (forward/back only) |
+| Implementation complexity | Simple | Moderate |
+| Performance at page 1,000 | Slow (skip 20,000 rows) | Fast (index seek) |
+
+Offset pagination becomes unacceptably slow beyond a few hundred pages. Cursor pagination scales to millions of rows with constant fetch time.
+
+### Keyset Pagination Pattern
+
+Cursor-based pagination anchors the next page to the last seen value of an indexed column (typically `createdAt` + `id` for tie-breaking).
+
+```ts
+// Backend: NestJS + MongoDB example
+async function getPaginatedPosts(cursor?: string, limit = 20) {
+  const filter = cursor
+    ? {
+        $or: [
+          { createdAt: { $lt: new Date(cursor.split('_')[0]) } },
+          {
+            createdAt: new Date(cursor.split('_')[0]),
+            _id: { $lt: cursor.split('_')[1] },
+          },
+        ],
+      }
+    : {};
+
+  const posts = await PostModel.find(filter)
+    .sort({ createdAt: -1, _id: -1 }) // compound index required
+    .limit(limit + 1); // fetch one extra to know if there's a next page
+
+  const hasMore = posts.length > limit;
+  const page = hasMore ? posts.slice(0, limit) : posts;
+  const lastItem = page.at(-1);
+
+  return {
+    items: page,
+    nextCursor: hasMore
+      ? `${lastItem!.createdAt.toISOString()}_${lastItem!._id}`
+      : null,
+  };
+}
+```
+
+Required index:
+
+```ts
+// Compound index matches sort order exactly
+PostSchema.index({ createdAt: -1, _id: -1 });
+```
+
+### Optimized Cursor Pagination with TanStack Query
+
+```ts
+// features/feed/hooks/use-feed.ts
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { feedKeys } from '../query-keys';
+import { fetchFeed } from '../api';
+
+export function useFeed(filters: FeedFilters) {
+  return useInfiniteQuery({
+    queryKey: feedKeys.list(filters),
+    queryFn: ({ pageParam }) =>
+      fetchFeed({ cursor: pageParam as string | undefined, ...filters }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
+    // Keep prior pages in cache for back-navigation without refetch
+    staleTime: 1000 * 60 * 2, // 2 minutes
+    // Limit memory: only keep the last 5 pages in cache
+    maxPages: 5,
+  });
+}
+
+// features/feed/screens/feed-screen.tsx
+export function FeedScreen() {
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useFeed({});
+
+  const items = useMemo(
+    () => data?.pages.flatMap(page => page.items) ?? [],
+    [data]
+  );
+
+  const onEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  return (
+    <FlashList
+      data={items}
+      estimatedItemSize={120}
+      keyExtractor={item => item.id}
+      renderItem={({ item }) => <FeedCard post={item} />}
+      onEndReached={onEndReached}
+      onEndReachedThreshold={0.5}
+      ListFooterComponent={isFetchingNextPage ? <LoadingSpinner /> : null}
+    />
+  );
+}
+```
+
+`maxPages: 5` caps the in-memory list at 100 items (5 pages × 20 items). When the user scrolls forward, the oldest pages are evicted. This prevents unbounded memory growth on long scroll sessions.

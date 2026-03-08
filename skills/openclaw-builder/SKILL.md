@@ -2,7 +2,7 @@
 name: openclaw-builder
 description: |
   Guide for setting up, configuring, and extending OpenClaw — an AI gateway for connecting LLM agents to messaging channels (Telegram, Discord, WhatsApp, Signal, etc.), automation (cron, webhooks, heartbeat), browser control, skills, and multi-agent workflows.
-  - MANDATORY TRIGGERS: setup openclaw, configure openclaw, install openclaw, openclaw telegram, openclaw discord, openclaw channel, openclaw gateway, openclaw cron, openclaw webhook, openclaw heartbeat, openclaw skills, openclaw agent, openclaw browser, openclaw memory, openclaw session, how to use openclaw, openclaw config, add skill to openclaw, install skill openclaw, openclaw mcp, openclaw acp, openclaw plugin, extend openclaw, openclaw builder, multi-agent openclaw, openclaw model, openclaw api key, openclaw anthropic, openclaw openai, dm scope, session isolation
+  - MANDATORY TRIGGERS: setup openclaw, configure openclaw, install openclaw, openclaw telegram, openclaw discord, openclaw channel, openclaw gateway, openclaw cron, openclaw webhook, openclaw heartbeat, openclaw skills, openclaw agent, openclaw browser, openclaw memory, openclaw session, how to use openclaw, openclaw config, add skill to openclaw, install skill openclaw, openclaw mcp, openclaw acp, openclaw plugin, extend openclaw, openclaw builder, multi-agent openclaw, openclaw model, openclaw api key, openclaw anthropic, openclaw openai, dm scope, session isolation, openclaw security, openclaw exec, openclaw elevated, openclaw sandbox, openclaw remote, openclaw tailscale, openclaw vps, openclaw slash commands, openclaw /new, openclaw /status, openclaw directive
   - Use this skill when the user wants to: install/setup OpenClaw, connect a messaging channel, configure the gateway, set up automation, add skills or agents, work with ACP/plugins, set up multi-agent routing, or troubleshoot OpenClaw issues.
 argument-hint: "[topic: getting-started | channels | automation | gateway | skills | acp | multi-agent | browser | memory | cli | plugins]"
 ---
@@ -44,6 +44,10 @@ python3 skills/skills/openclaw-builder/scripts/fetch-docs.py <page-path>
 | Browser control | `docs/browser-guide.md` | User wants to use/configure browser automation |
 | Webhooks | `docs/webhooks-guide.md` | User wants external HTTP triggers, GitHub/Gmail webhooks |
 | Sandboxing | `docs/sandboxing-guide.md` | User wants Docker isolation for agent tools |
+| Security | `docs/security-guide.md` | User asks about security, hardening, audit, secrets |
+| Slash commands | `docs/commands-guide.md` | User asks about /commands, directives, /think, /model |
+| Remote gateway | `docs/remote-gateway-guide.md` | User wants Tailscale, VPS, Docker, remote access |
+| Exec & Elevated | `docs/exec-guide.md` | User wants exec tool, elevated mode, bash, approvals |
 
 **Load a local guide:**
 ```bash
@@ -60,6 +64,10 @@ cat skills/skills/openclaw-builder/docs/models-auth-guide.md
 cat skills/skills/openclaw-builder/docs/browser-guide.md
 cat skills/skills/openclaw-builder/docs/webhooks-guide.md
 cat skills/skills/openclaw-builder/docs/sandboxing-guide.md
+cat skills/skills/openclaw-builder/docs/security-guide.md
+cat skills/skills/openclaw-builder/docs/commands-guide.md
+cat skills/skills/openclaw-builder/docs/remote-gateway-guide.md
+cat skills/skills/openclaw-builder/docs/exec-guide.md
 ```
 
 ---

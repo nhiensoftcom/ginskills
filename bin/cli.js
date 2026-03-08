@@ -271,9 +271,24 @@ async function cmdUpgrade(options, targetArg) {
   log.info(`Target: ${chalk.cyan(target)}`);
   log.info(`Current package: ${chalk.cyan(`v${PKG.version}`)}\n`);
 
-  // Non-interactive
-  if (options.all) {
-    return runInstall({ target, skills: installed.skills, agents: installed.agents, verb: 'Upgraded' });
+  // Non-interactive: --all or --skills/--agents flags
+  if (options.all || options.skills || options.agents) {
+    const skills = options.all ? installed.skills
+      : options.skills ? options.skills.split(',').map(s => s.trim()).filter(s => installed.skills.includes(s))
+      : [];
+    const agents = options.all ? installed.agents
+      : options.agents ? options.agents.split(',').map(s => s.trim()).filter(s => installed.agents.includes(s))
+      : [];
+
+    if (skills.length === 0 && agents.length === 0) {
+      log.warn('No matching installed items found.');
+      return;
+    }
+
+    log.info(`Skills (${skills.length}): ${chalk.green(skills.join(', ') || 'none')}`);
+    log.info(`Agents (${agents.length}): ${chalk.cyan(agents.join(', ') || 'none')}`);
+    console.log();
+    return runInstall({ target, skills, agents, verb: 'Upgraded' });
   }
 
   const skills = await multiSelect('Select skills to upgrade:', installed.skills.map(s => ({
@@ -488,6 +503,8 @@ addTargetOptions(
   program.command('upgrade')
     .description('Upgrade installed skills & agents to the bundled version')
     .option('-a, --all', 'Upgrade all without prompts')
+    .option('--skills <list>', 'Upgrade specific skills only (comma-separated names)')
+    .option('--agents <list>', 'Upgrade specific agents only (comma-separated names)')
 )
 .action((targetArg, opts) => cmdUpgrade(mergeOpts(opts), targetArg));
 

@@ -283,6 +283,12 @@ function updateLanding(skills, agents) {
     `$1${ver}`,
   )
 
+  // 10. Badge (hero subtitle)
+  html = html.replace(
+    /<!-- AUTO:BADGE -->.*?<!-- \/AUTO:BADGE -->/,
+    `<!-- AUTO:BADGE -->v${ver} &mdash; ${skills.length} Skills &middot; ${agents.length} Agents<!-- /AUTO:BADGE -->`,
+  )
+
   writeFileSync(landingPath, html)
 }
 

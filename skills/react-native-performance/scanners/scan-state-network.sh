@@ -44,13 +44,29 @@ grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 
     done
 
 # Zustand store subscribed without selector
+# Skip commented-out code and store definition files (where the hook is created, not called)
 echo ""
 echo "--- Zustand Store Without Selector ---"
 grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
   'useStore()\|use[A-Z][a-zA-Z]*Store()' "$DIR" 2>/dev/null \
   | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
   | while IFS= read -r line; do
-      file_loc=$(echo "$line" | cut -d: -f1,2)
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      content=$(echo "$line" | cut -d: -f3-)
+      file_loc="$file:$lineno"
+
+      # Skip commented-out lines (// or * at start, or inside block comments)
+      trimmed=$(echo "$content" | sed 's/^[[:space:]]*//')
+      if echo "$trimmed" | grep -qE '^\s*(//|/?\*|\*)'; then
+        continue
+      fi
+
+      # Skip store definition files (where create() defines the hook)
+      if grep -q 'create(' "$file" && grep -q 'zustand\|from.*create' "$file"; then
+        continue
+      fi
+
       echo "$file_loc — [ERROR] Zustand store subscribed without selector → Pass a selector: useStore(state => state.field) to avoid re-renders on unrelated state changes"
       ISSUES=$((ISSUES + 1))
     done

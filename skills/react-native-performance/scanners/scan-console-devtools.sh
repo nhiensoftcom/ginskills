@@ -7,6 +7,7 @@ echo "Console & DevTools Scanner"
 echo "================================"
 
 # console.log without __DEV__ guard
+# Escalates to ERROR when on gesture/animation hot paths (60fps concern)
 echo ""
 echo "--- console.log Without __DEV__ Guard ---"
 grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
@@ -25,7 +26,13 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       file_context=$(sed -n "1,$((lineno - 1))p" "$file" 2>/dev/null)
       if ! echo "$context" | grep -q '__DEV__\|if.*DEV' && \
          ! echo "$file_context" | grep -q '= __DEV__'; then
-        echo "$file:$lineno — [WARN] console.log without __DEV__ guard → Wrap with if (__DEV__) or use babel-plugin-transform-remove-console"
+        # Check if this console.log is on a gesture/animation hot path (runs every frame)
+        hot_path_context=$(sed -n "$((lineno > 20 ? lineno - 20 : 1)),${lineno}p" "$file" 2>/dev/null)
+        if echo "$hot_path_context" | grep -qE 'onUpdate|onActive|Pan\.|onMove|onScroll|onGestureEvent|Gesture\.|worklet|runOnJS|requestAnimationFrame|\.addListener'; then
+          echo "$file:$lineno — [ERROR] console.log on gesture/animation hot path (runs every frame at 60fps) → Remove or wrap with __DEV__; serialization on hot paths causes jank"
+        else
+          echo "$file:$lineno — [WARN] console.log without __DEV__ guard → Wrap with if (__DEV__) or use babel-plugin-transform-remove-console"
+        fi
         ISSUES=$((ISSUES + 1))
       fi
     done

@@ -243,6 +243,29 @@ grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 
       fi
     done
 
+# AbortSignal.addEventListener("abort", ...) without { once: true }
+# When composing AbortControllers (e.g. timeout + user cancel), each listener on the
+# upstream signal accumulates if not cleaned up. { once: true } auto-removes after firing.
+echo ""
+echo "--- AbortSignal addEventListener Without { once: true } ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  '\.addEventListener.*abort' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      match_text=$(echo "$line" | cut -d: -f3-)
+      # Check if { once: true } is present on the same line or within the next 2 lines
+      context=$(sed -n "${lineno},$((lineno + 2))p" "$file" 2>/dev/null)
+      if ! echo "$context" | grep -q 'once.*true\|{ once: true }'; then
+        # Check if there's a matching removeEventListener for cleanup
+        if ! grep -q 'removeEventListener.*abort' "$file"; then
+          echo "$file:$lineno — [WARN] addEventListener(\"abort\", fn) without { once: true } → Listeners accumulate on reused signals causing memory leak; add { once: true } as 3rd arg or call removeEventListener in cleanup"
+          ISSUES=$((ISSUES + 1))
+        fi
+      fi
+    done
+
 # Reanimated useAnimatedReaction without cancelAnimation cleanup
 echo ""
 echo "--- useAnimatedReaction Without cancelAnimation Cleanup ---"

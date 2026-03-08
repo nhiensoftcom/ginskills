@@ -149,8 +149,8 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       if echo "$own_context" | grep -q 'headerShown'; then
         continue
       fi
-      # Look backward up to 40 lines for a parent screenOptions block that sets headerShown
-      start_line=$((lineno > 40 ? lineno - 40 : 1))
+      # Look backward up to 60 lines for a parent screenOptions block that sets headerShown
+      start_line=$((lineno > 60 ? lineno - 60 : 1))
       parent_context=$(sed -n "${start_line},$((lineno - 1))p" "$file" 2>/dev/null)
       if echo "$parent_context" | grep -q 'screenOptions' && echo "$parent_context" | grep -q 'headerShown'; then
         continue
@@ -210,8 +210,8 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       if echo "$own_context" | grep -q 'gestureEnabled\|gestureDirection'; then
         continue
       fi
-      # Look backward up to 40 lines for a parent screenOptions that sets gestureEnabled
-      start_line=$((lineno > 40 ? lineno - 40 : 1))
+      # Look backward up to 60 lines for a parent screenOptions that sets gestureEnabled
+      start_line=$((lineno > 60 ? lineno - 60 : 1))
       parent_context=$(sed -n "${start_line},$((lineno - 1))p" "$file" 2>/dev/null)
       if echo "$parent_context" | grep -q 'screenOptions' && echo "$parent_context" | grep -q 'gestureEnabled\|gestureDirection'; then
         continue

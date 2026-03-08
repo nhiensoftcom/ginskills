@@ -19,8 +19,12 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       # Check a 10-line context window above the call for any __DEV__ reference,
       # catching both direct `if (__DEV__)` guards and indirect patterns like
       # `const DEBUG = __DEV__` followed by `if (!DEBUG) return`.
+      # Also scan the whole file above for a module-level `__DEV__` variable assignment
+      # (e.g. `const DEBUG_ENABLED = __DEV__`) that an early-return guard may reference.
       context=$(sed -n "$((lineno > 10 ? lineno - 10 : 1)),$((lineno - 1))p" "$file" 2>/dev/null)
-      if ! echo "$context" | grep -q '__DEV__\|if.*DEV'; then
+      file_context=$(sed -n "1,$((lineno - 1))p" "$file" 2>/dev/null)
+      if ! echo "$context" | grep -q '__DEV__\|if.*DEV' && \
+         ! echo "$file_context" | grep -q '= __DEV__'; then
         echo "$file:$lineno — [WARN] console.log without __DEV__ guard → Wrap with if (__DEV__) or use babel-plugin-transform-remove-console"
         ISSUES=$((ISSUES + 1))
       fi
@@ -37,8 +41,12 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       file=$(echo "$line" | cut -d: -f1)
       lineno=$(echo "$line" | cut -d: -f2)
       # Check a 10-line context window above the call for any __DEV__ reference.
+      # Also scan the whole file above for a module-level `= __DEV__` variable assignment
+      # that an early-return guard may reference indirectly.
       context=$(sed -n "$((lineno > 10 ? lineno - 10 : 1)),$((lineno - 1))p" "$file" 2>/dev/null)
-      if ! echo "$context" | grep -q '__DEV__\|if.*DEV'; then
+      file_context=$(sed -n "1,$((lineno - 1))p" "$file" 2>/dev/null)
+      if ! echo "$context" | grep -q '__DEV__\|if.*DEV' && \
+         ! echo "$file_context" | grep -q '= __DEV__'; then
         echo "$file:$lineno — [WARN] console.warn without __DEV__ guard → Wrap with if (__DEV__) or suppress in production logger"
         ISSUES=$((ISSUES + 1))
       fi

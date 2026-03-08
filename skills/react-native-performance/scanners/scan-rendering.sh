@@ -125,7 +125,7 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
   | while IFS= read -r line; do
       file=$(echo "$line" | cut -d: -f1)
       lineno=$(echo "$line" | cut -d: -f2)
-      prev_context=$(sed -n "1,$((lineno - 1))p" "$file" 2>/dev/null | grep -c 'function [a-zA-Z]*\|const [A-Z][a-zA-Z]* = ' 2>/dev/null || echo 0)
+      prev_context=$(sed -n "1,$((lineno - 1))p" "$file" 2>/dev/null | grep -c 'function [a-zA-Z]*\|const [A-Z][a-zA-Z]* = ' 2>/dev/null; true)
       if [ "$prev_context" -gt 0 ]; then
         open_braces=$(sed -n "1,$((lineno - 1))p" "$file" 2>/dev/null | tr -cd '{' | wc -c | tr -d ' ')
         close_braces=$(sed -n "1,$((lineno - 1))p" "$file" 2>/dev/null | tr -cd '}' | wc -c | tr -d ' ')

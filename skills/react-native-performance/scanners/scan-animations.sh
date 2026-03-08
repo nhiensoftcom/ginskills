@@ -68,7 +68,7 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       file=$(echo "$line" | cut -d: -f1)
       lineno=$(echo "$line" | cut -d: -f2)
       context=$(sed -n "$((lineno > 3 ? lineno - 3 : 1)),$((lineno + 3))p" "$file" 2>/dev/null)
-      shadow_props=$(echo "$context" | grep -c 'shadowOffset\|shadowRadius\|shadowOpacity\|shadowColor' 2>/dev/null || echo 0)
+      shadow_props=$(echo "$context" | grep -Ec 'shadowOffset|shadowRadius|shadowOpacity|shadowColor' 2>/dev/null; true)
       if [ "$shadow_props" -ge 3 ]; then
         echo "$file:$lineno — [WARN] Complex iOS shadow (multiple shadow props) → Shadows on animated views cause off-screen compositing; use elevation on Android and pre-render shadows where possible"
         ISSUES=$((ISSUES + 1))
@@ -126,6 +126,7 @@ echo "--- LottieView Without loop Prop ---"
 grep -rn --include="*.tsx" --include="*.jsx" \
   '<LottieView\|<AnimatedLottieView' "$DIR" 2>/dev/null \
   | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | grep -v 'useRef<\|useState<\|useMemo<\|useCallback<' \
   | while IFS= read -r line; do
       file=$(echo "$line" | cut -d: -f1)
       lineno=$(echo "$line" | cut -d: -f2)
@@ -143,7 +144,7 @@ grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 
   'Animated\.View\|useAnimatedStyle' "$DIR" 2>/dev/null \
   | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
   | while IFS= read -r file; do
-      anim_count=$(grep -c '<Animated\.View\|Animated\.createAnimatedComponent' "$file" 2>/dev/null || echo 0)
+      anim_count=$(grep -Ec '<Animated\.View|Animated\.createAnimatedComponent' "$file" 2>/dev/null; true)
       if [ "$anim_count" -gt 3 ]; then
         if ! grep -q 'shouldRasterizeIOS\|renderToHardwareTextureAndroid' "$file"; then
           grep -n '<Animated\.View' "$file" | head -1 | while IFS= read -r match; do

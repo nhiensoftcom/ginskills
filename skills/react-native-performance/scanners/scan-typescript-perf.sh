@@ -24,7 +24,7 @@ grep -rn --include="*.tsx" --include="*.ts" \
       else
         # Multi-line union: declaration ends with '=', values are on subsequent lines prefixed with '|'
         # Read subsequent lines until a line that does NOT start with optional whitespace + '|'
-        pipe_count=$(awk "NR > ${lineno} { if (/^\s*\|/) { count++ } else { exit } } END { print count+0 }" "$file" 2>/dev/null)
+        pipe_count=$(awk "NR > ${lineno} { if (/^[[:space:]]*\|/) { count++ } else { exit } } END { print count+0 }" "$file" 2>/dev/null)
       fi
       if [ "$pipe_count" -ge 10 ]; then
         echo "$file:$lineno — [WARN] Union type with $((pipe_count + 1))+ variants → Large unions slow down the TypeScript language server and type-checking; consider a discriminated union with a kind field or enum"

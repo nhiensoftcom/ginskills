@@ -55,17 +55,24 @@ grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 
       fi
     done
 
-# setTimeout in useEffect without clearTimeout
+# setTimeout inside useEffect without clearTimeout
+# Only flags when setTimeout appears within 25 lines after a useEffect call (scoped to effect body)
 echo ""
 echo "--- setTimeout Without clearTimeout ---"
 grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 'setTimeout(' "$DIR" 2>/dev/null \
   | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
   | while IFS= read -r file; do
-      if grep -q 'useEffect' "$file" && ! grep -q 'clearTimeout' "$file"; then
-        grep -n 'setTimeout(' "$file" | while IFS= read -r match; do
-          lineno=$(echo "$match" | cut -d: -f1)
-          echo "$file:$lineno — [WARN] setTimeout inside component without clearTimeout → Store ref and clear in useEffect cleanup"
-          ISSUES=$((ISSUES + 1))
+      if ! grep -q 'clearTimeout' "$file"; then
+        # Only flag setTimeout that appears within a useEffect body (within 25 lines after useEffect)
+        grep -n 'useEffect(' "$file" | while IFS= read -r ueline; do
+          uelineno=$(echo "$ueline" | cut -d: -f1)
+          endlineno=$((uelineno + 25))
+          block=$(sed -n "${uelineno},${endlineno}p" "$file" 2>/dev/null)
+          if echo "$block" | grep -q 'setTimeout('; then
+            # Report the useEffect line so the developer sees where to add cleanup
+            echo "$file:$uelineno — [WARN] setTimeout inside useEffect without clearTimeout → Store ref and call clearTimeout in useEffect cleanup"
+            ISSUES=$((ISSUES + 1))
+          fi
         done
       fi
     done
@@ -85,21 +92,21 @@ grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 
       fi
     done
 
-# fetch inside useEffect without AbortController
-# Strategy: look for files where fetch() appears on a line that is preceded by useEffect
-# within a 30-line window. This avoids flagging fetch() calls in standalone utility functions.
+# fetch() inside useEffect without AbortController
+# Uses [^a-zA-Z]fetch( to exclude refetch(), prefetch(), etc.
 echo ""
 echo "--- fetch Without AbortController ---"
 grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 'useEffect' "$DIR" 2>/dev/null \
   | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
   | while IFS= read -r file; do
       if ! grep -q 'AbortController\|signal\|abortController' "$file"; then
-        # Walk each useEffect block: check the 30 lines after it for a fetch() call
-        grep -n 'useEffect' "$file" | while IFS= read -r ueline; do
+        # Walk each useEffect block: check the 30 lines after it for a bare fetch() call
+        grep -n 'useEffect(' "$file" | while IFS= read -r ueline; do
           uelineno=$(echo "$ueline" | cut -d: -f1)
           endlineno=$((uelineno + 30))
           block=$(sed -n "${uelineno},${endlineno}p" "$file" 2>/dev/null)
-          if echo "$block" | grep -q 'fetch('; then
+          # Exclude refetch(, prefetch(, etc. — only match fetch( not preceded by a word char
+          if echo "$block" | grep -qE '[^a-zA-Z]fetch\(|^fetch\('; then
             echo "$file:$uelineno — [WARN] fetch() in useEffect without AbortController → Add AbortController and return cleanup calling abort()"
             ISSUES=$((ISSUES + 1))
           fi
@@ -138,22 +145,10 @@ grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 
       fi
     done
 
-# useEffect with subscriptions but no cleanup return (heuristic)
-echo ""
-echo "--- useEffect With Subscription But No Cleanup Return ---"
-grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 'useEffect(' "$DIR" 2>/dev/null \
-  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
-  | while IFS= read -r line; do
-      file=$(echo "$line" | cut -d: -f1)
-      lineno=$(echo "$line" | cut -d: -f2)
-      context=$(sed -n "${lineno},$((lineno + 40))p" "$file" 2>/dev/null)
-      if echo "$context" | grep -q 'subscribe\|addListener\|addEventListener\|setInterval\|setTimeout'; then
-        if ! echo "$context" | grep -qE 'return[[:space:]]*\(\)'; then
-          echo "$file:$lineno — [WARN] useEffect with subscription/listener may be missing cleanup return → Add return () => { ... } cleanup"
-          ISSUES=$((ISSUES + 1))
-        fi
-      fi
-    done
+# NOTE: A generic "useEffect with subscription but no cleanup return" heuristic is intentionally
+# omitted. Without a real JS parser, any line-count-based approximation produces too many false
+# positives from nested callbacks and adjacent effects. The dedicated checks above (addListener,
+# subscribe, addEventListener, setInterval, AppState) catch these patterns more reliably.
 
 # AppState.addEventListener without remove
 echo ""

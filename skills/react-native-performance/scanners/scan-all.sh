@@ -35,6 +35,7 @@ SCANNERS=(
   "console-devtools:Console & DevTools"
   "typescript-perf:TypeScript Performance"
   "build-config:Build Configuration"
+  "unused-assets:Unused Assets"
 )
 
 for entry in "${SCANNERS[@]}"; do
@@ -133,4 +134,5 @@ echo "  bash $SCRIPT_DIR/scan-animations.sh $DIR"
 echo "  bash $SCRIPT_DIR/scan-console-devtools.sh $DIR"
 echo "  bash $SCRIPT_DIR/scan-typescript-perf.sh $DIR"
 echo "  bash $SCRIPT_DIR/scan-build-config.sh $DIR"
+echo "  bash $SCRIPT_DIR/scan-unused-assets.sh $DIR"
 echo ""

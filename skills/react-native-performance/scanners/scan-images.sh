@@ -104,7 +104,7 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
   | while IFS= read -r line; do
       file_loc=$(echo "$line" | cut -d: -f1,2)
       echo "$file_loc — [INFO] Using react-native <Image> → Consider expo-image or react-native-fast-image for better caching, blurhash support, and performance"
-      ISSUES=$((ISSUES + 1))
+      echo 1 >> "$TMPFILE"
     done
 
 # GIF images (memory-heavy)
@@ -116,7 +116,7 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
   | while IFS= read -r line; do
       file_loc=$(echo "$line" | cut -d: -f1,2)
       echo "$file_loc — [WARN] GIF image detected → GIFs are memory-heavy; use Lottie animations or video loops instead"
-      ISSUES=$((ISSUES + 1))
+      echo 1 >> "$TMPFILE"
     done
 
 # Images in list without React.memo on item component
@@ -131,7 +131,7 @@ grep -rln --include="*.tsx" --include="*.jsx" \
           grep -n '<Image ' "$file" | head -1 | while IFS= read -r match; do
             lineno=$(echo "$match" | cut -d: -f1)
             echo "$file:$lineno — [WARN] Image in list without React.memo on item component → Wrap list item component with React.memo to prevent unnecessary re-renders"
-            ISSUES=$((ISSUES + 1))
+            echo 1 >> "$TMPFILE"
           done
         fi
       fi

@@ -1,6 +1,6 @@
 {
   "name": "gin-skills",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Install GinStudio skills and agents for Claude Code",
   "homepage": "https://skills.ginstudio.asia",
   "repository": {
@@ -16,11 +16,17 @@
   ],
   "license": "MIT",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "gen-readme": "node scripts/gen-readme.mjs",
     "check-upstream": "node scripts/check-upstream.mjs",
     "deploy": "npx wrangler pages deploy landing --project-name ginskill --branch main",
-    "prepublishOnly": "node scripts/gen-readme.mjs"
+    "prepublishOnly": "npm version patch --no-git-tag-version && node scripts/gen-readme.mjs",
+    "postpublish": "git add -A && git commit -m \"chore: release v$(node -p \"require('./package.json').version\")\" && git tag v$(node -p \"require('./package.json').version\") && git push && git push --tags && npm run deploy",
+    "release:minor": "npm version minor --no-git-tag-version && npm publish",
+    "release:major": "npm version major --no-git-tag-version && npm publish"
   },
   "bin": {
     "gin-skills": "bin/cli.js"

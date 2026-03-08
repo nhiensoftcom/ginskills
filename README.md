@@ -78,8 +78,10 @@ gin-skills versions   # Show all published npm versions
 | `mobile-app-review` | `--skills mobile-app-review` | Mobile App Store Review Checklist: Comprehensive pre-submission audit for Apple App Store and Google Play Store. |
 | `mongodb` | `--skills mongodb` | MongoDB & Mongoose Best Practices: Production patterns for schema design, indexing, aggregation pipelines, transactions, connection management, and... |
 | `nestjs-architecture` | `--skills nestjs-architecture` | NestJS Feature-Based Architecture: Production patterns for organizing NestJS backends — feature modules, core infrastructure, shared utilities, gua... |
+| `openclaw-builder` | `--skills openclaw-builder` | Guide for setting up, configuring, and extending OpenClaw — an AI gateway for connecting LLM agents to messaging channels (Telegram, Discord, Whats... |
 | `react-fsd-architecture` | `--skills react-fsd-architecture` | Feature-Sliced Design (FSD) Architecture: Architectural methodology for organizing frontend projects by business features — layers, slices, segment... |
 | `react-native-expo` | `--skills react-native-expo` | React Native Expo (Sty AI Mobile): Production patterns for the Sty AI React Native app — Expo SDK 54, Expo Router v5, React Query v5, Zustand v5, R... |
+| `react-native-performance` | `--skills react-native-performance` | React Native Performance Optimization: Comprehensive guide — rendering, memory leaks, bundle size, startup, animations, navigation, algorithms, and... |
 | `react-query` | `--skills react-query` | TanStack React Query Best Practices: Comprehensive guide for writing production-quality React Query code — query keys, mutations, caching, optimist... |
 | `review-code` | `--skills review-code` | Code Review: Comprehensive code review and quality analysis for fullstack monorepos (NestJS backend, Next.js frontend, React Native mobile). |
 | `security-scanner` | `--skills security-scanner` | Security Scanner: Comprehensive security audit for fullstack monorepos — NestJS backend, Next.js frontend, and React Native mobile app. |

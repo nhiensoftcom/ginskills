@@ -30,12 +30,35 @@ grep -rn --include="*.tsx" --include="*.jsx" --include="*.ts" --include="*.js" '
     done
 
 # key={index} or key={i} or key={idx}
+# Skip static/skeleton lists where index keys are safe (never reordered, no unique IDs)
 echo ""
 echo "--- Index as List Key ---"
 grep -rn --include="*.tsx" --include="*.jsx" 'key={index}\|key={i}\b\|key={idx}' "$DIR" 2>/dev/null \
   | grep -v node_modules \
   | while IFS= read -r line; do
-      file_loc=$(echo "$line" | cut -d: -f1,2)
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      file_loc="$file:$lineno"
+      content=$(echo "$line" | cut -d: -f3-)
+
+      # Check surrounding context (5 lines before, 2 after) for skeleton/static patterns
+      context=$(sed -n "$((lineno > 5 ? lineno - 5 : 1)),$((lineno + 2))p" "$file" 2>/dev/null)
+
+      # Skip 1: Static skeleton arrays (Array.from, Array(N), new Array)
+      if echo "$context" | grep -qE 'Array\.from|Array\([0-9]|new Array|\.fill\(|Skeleton|skeleton'; then
+        continue
+      fi
+
+      # Skip 2: Files that are skeleton components (filename contains skeleton/loading)
+      if echo "$file" | grep -qiE 'skeleton|loading-skeleton|placeholder'; then
+        continue
+      fi
+
+      # Skip 3: Static enum/constant arrays that never reorder
+      if echo "$context" | grep -qE 'const\s+\[.*\]\s*=|\.entries\(\)|Object\.keys|Object\.values'; then
+        continue
+      fi
+
       echo "$file_loc — [ERROR] Using index as key causes O(n) re-renders → Use stable unique ID (item.id)"
       ISSUES=$((ISSUES + 1))
     done

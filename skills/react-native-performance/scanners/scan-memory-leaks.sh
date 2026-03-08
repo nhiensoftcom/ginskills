@@ -146,7 +146,7 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" '
   | while IFS= read -r line; do
       file=$(echo "$line" | cut -d: -f1)
       lineno=$(echo "$line" | cut -d: -f2)
-      context=$(sed -n "${lineno},$((lineno + 20))p" "$file" 2>/dev/null)
+      context=$(sed -n "${lineno},$((lineno + 40))p" "$file" 2>/dev/null)
       if echo "$context" | grep -q 'subscribe\|addListener\|addEventListener\|setInterval\|setTimeout'; then
         if ! echo "$context" | grep -qE 'return[[:space:]]*\(\)'; then
           echo "$file:$lineno — [WARN] useEffect with subscription/listener may be missing cleanup return → Add return () => { ... } cleanup"

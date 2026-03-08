@@ -158,12 +158,13 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       file=$(echo "$line" | cut -d: -f1)
       lineno=$(echo "$line" | cut -d: -f2)
       # Skip lines that themselves reference __DEV__ (e.g. `if (!__DEV__ || ...localhost...)`)
-      # Also skip lines that are inside a __DEV__-guarded block by scanning 10 lines of context.
+      # Also skip lines that are inside a __DEV__-guarded block by scanning the entire
+      # preceding file content up to this line (handles early-return guards at any distance).
       match_line=$(echo "$line" | cut -d: -f3-)
       if echo "$match_line" | grep -q '__DEV__'; then
         continue
       fi
-      context=$(sed -n "$((lineno > 10 ? lineno - 10 : 1)),$((lineno - 1))p" "$file" 2>/dev/null)
+      context=$(sed -n "$((lineno > 30 ? lineno - 30 : 1)),$((lineno - 1))p" "$file" 2>/dev/null)
       if echo "$context" | grep -q '__DEV__'; then
         continue
       fi

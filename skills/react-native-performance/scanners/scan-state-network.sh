@@ -146,9 +146,10 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
 echo ""
 echo "--- Direct State Mutation ---"
 grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
-  '\bstate\.[a-zA-Z]* =' "$DIR" 2>/dev/null \
+  '\bstate\.[a-zA-Z][a-zA-Z]* =' "$DIR" 2>/dev/null \
   | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
   | grep -v '\/\/\|const state\|let state\|var state\|initialState\|useState\|//\s*state' \
+  | grep -vE '\bstate\.[a-zA-Z]+ ==' \
   | while IFS= read -r line; do
       file_loc=$(echo "$line" | cut -d: -f1,2)
       echo "$file_loc — [ERROR] Possible direct state mutation → Use setState/dispatch with new object; direct mutation won't trigger re-render"
@@ -184,7 +185,7 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       lineno=$(echo "$line" | cut -d: -f2)
       next_line=$(sed -n "$((lineno + 1))p" "$file" 2>/dev/null)
       curr_line=$(sed -n "${lineno}p" "$file" 2>/dev/null)
-      if echo "$next_line" | grep -qE '^\s+set[A-Z][a-zA-Z]*(' && echo "$curr_line" | grep -qE '^\s+set[A-Z][a-zA-Z]*('; then
+      if echo "$next_line" | grep -qE '^\s+set[A-Z][a-zA-Z]*\(' && echo "$curr_line" | grep -qE '^\s+set[A-Z][a-zA-Z]*\('; then
         echo "$file:$lineno — [WARN] Multiple sequential setState calls → React 18 auto-batches inside event handlers, but sequential calls in async contexts may cause multiple renders; use useReducer or a single state object"
         ISSUES=$((ISSUES + 1))
       fi

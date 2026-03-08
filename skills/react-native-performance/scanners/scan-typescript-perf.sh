@@ -15,8 +15,17 @@ grep -rn --include="*.tsx" --include="*.ts" \
   | while IFS= read -r line; do
       file=$(echo "$line" | cut -d: -f1)
       lineno=$(echo "$line" | cut -d: -f2)
-      context=$(sed -n "${lineno},$((lineno + 3))p" "$file" 2>/dev/null)
-      pipe_count=$(echo "$context" | grep -o '|' | wc -l | tr -d ' ')
+      matched_line=$(echo "$line" | cut -d: -f3-)
+      # Check if this is a single-line union (has | on the same line as the type declaration)
+      # or a multi-line union (declaration line ends with = and values start on next lines)
+      if echo "$matched_line" | grep -q '|'; then
+        # Single-line union: count only pipes on the matched line itself
+        pipe_count=$(echo "$matched_line" | grep -o '|' | wc -l | tr -d ' ')
+      else
+        # Multi-line union: declaration ends with '=', values are on subsequent lines prefixed with '|'
+        # Read subsequent lines until a line that does NOT start with optional whitespace + '|'
+        pipe_count=$(awk "NR > ${lineno} { if (/^\s*\|/) { count++ } else { exit } } END { print count+0 }" "$file" 2>/dev/null)
+      fi
       if [ "$pipe_count" -ge 10 ]; then
         echo "$file:$lineno — [WARN] Union type with $((pipe_count + 1))+ variants → Large unions slow down the TypeScript language server and type-checking; consider a discriminated union with a kind field or enum"
         ISSUES=$((ISSUES + 1))

@@ -145,7 +145,7 @@ grep -rn --include="*.tsx" --include="*.jsx" '<ImageBackground' "$DIR" 2>/dev/nu
   | while IFS= read -r line; do
       file_loc=$(echo "$line" | cut -d: -f1,2)
       echo "$file_loc — [INFO] <ImageBackground> detected → If used for decoration only, consider absolute-positioned <Image> inside a <View> for better compositing control"
-      ISSUES=$((ISSUES + 1))
+      echo 1 >> "$TMPFILE"
     done
 
 # Image.getSize() called inside render
@@ -157,10 +157,10 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
   | while IFS= read -r line; do
       file=$(echo "$line" | cut -d: -f1)
       lineno=$(echo "$line" | cut -d: -f2)
-      context=$(sed -n "$((lineno > 5 ? lineno - 5 : 1)),$((lineno + 2))p" "$file" 2>/dev/null)
+      context=$(sed -n "$((lineno > 30 ? lineno - 30 : 1)),$((lineno + 2))p" "$file" 2>/dev/null)
       if ! echo "$context" | grep -q 'useEffect\|useCallback\|useMemo'; then
         echo "$file:$lineno — [WARN] Image.getSize() outside useEffect → Calling Image.getSize() at render time triggers async work on every render; move into useEffect or useCallback"
-        ISSUES=$((ISSUES + 1))
+        echo 1 >> "$TMPFILE"
       fi
     done
 
@@ -168,13 +168,13 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
 echo ""
 echo "--- PNG Used for Photos (Consider JPEG/WebP) ---"
 grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
-  "require('.*\(photo\|image\|img\|banner\|hero\|cover\|background\|bg\).*\.png')\|require(\".*\(photo\|image\|img\|banner\|hero\|cover\|background\|bg\).*\.png\")\|uri:.*\.png" \
+  "require('.*\/\(photo\|image\|img\|banner\|hero\|cover\|background\|bg\)[^/]*\.png')\|require(\".*\/\(photo\|image\|img\|banner\|hero\|cover\|background\|bg\)[^/]*\.png\")\|uri:.*\.png" \
   "$DIR" 2>/dev/null \
   | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
   | while IFS= read -r line; do
       file_loc=$(echo "$line" | cut -d: -f1,2)
       echo "$file_loc — [INFO] PNG used for photographic/large image → PNG is lossless; use JPEG (photos) or WebP (both) for significantly smaller file sizes"
-      ISSUES=$((ISSUES + 1))
+      echo 1 >> "$TMPFILE"
     done
 
 # Image source as inline object source={{ uri }} (new ref each render)
@@ -189,7 +189,7 @@ grep -rn --include="*.tsx" --include="*.jsx" \
       context=$(sed -n "$((lineno > 3 ? lineno - 3 : 1)),$((lineno + 1))p" "$file" 2>/dev/null)
       if ! echo "$context" | grep -q 'useMemo\|useCallback\|const.*=.*{.*uri'; then
         echo "$file:$lineno — [WARN] Inline source={{ uri }} object creates a new reference on every render → Extract to a useMemo or variable outside JSX to allow image cache reuse"
-        ISSUES=$((ISSUES + 1))
+        echo 1 >> "$TMPFILE"
       fi
     done
 
@@ -202,8 +202,11 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
   | while IFS= read -r line; do
       file_loc=$(echo "$line" | cut -d: -f1,2)
       echo "$file_loc — [WARN] Remote image URL with very large dimensions (>2000px) → Request appropriately sized images using CDN params (e.g., ?w=800); oversized images waste memory"
-      ISSUES=$((ISSUES + 1))
+      echo 1 >> "$TMPFILE"
     done
 
+ISSUES=$(wc -l < "$TMPFILE" 2>/dev/null | tr -d ' ')
+rm -f "$TMPFILE"
+
 echo ""
-echo "Image scan complete."
+echo "Image scan complete. Total issues found: ${ISSUES:-0}"

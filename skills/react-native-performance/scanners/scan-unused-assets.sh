@@ -51,6 +51,17 @@ while IFS= read -r sf; do
   cat "$sf" 2>/dev/null
 done < "$SRC_TMPFILE" > "$SRC_CONTENT_TMPFILE"
 
+# Also collect project-level config files (app.config.*, app.json, etc.) that may
+# reference image assets via relative paths — these live outside the src/ directory.
+IMG_CONFIG_TMPFILE=$(mktemp)
+find "${DIR%/src}" \
+  \( -name "app.json" -o -name "app.config.js" -o -name "app.config.ts" \
+     -o -name "eas.json" -o -name "expo.json" \) \
+  -not -path "*/node_modules/*" \
+  -maxdepth 6 \
+  2>/dev/null \
+  | while IFS= read -r cf; do cat "$cf" 2>/dev/null; done > "$IMG_CONFIG_TMPFILE"
+
 # Track base names already reported (to group @2x/@3x variants)
 SEEN_BASES_TMPFILE=$(mktemp)
 
@@ -70,8 +81,9 @@ find "$DIR" \
       fi
       echo "$base" >> "$SEEN_BASES_TMPFILE"
 
-      # Check whether the base name (or full filename) appears in any source file
-      if ! grep -qF "$base" "$SRC_CONTENT_TMPFILE" 2>/dev/null; then
+      # Check whether the base name (or full filename) appears in source or config files
+      if ! grep -qF "$base" "$SRC_CONTENT_TMPFILE" 2>/dev/null \
+         && ! grep -qF "$base" "$IMG_CONFIG_TMPFILE" 2>/dev/null; then
         size=$(wc -c < "$asset" 2>/dev/null | tr -d ' ')
         size=${size:-0}
         kb=$(( size / 1024 ))
@@ -85,6 +97,7 @@ find "$DIR" \
     done
 
 rm -f "$SEEN_BASES_TMPFILE"
+rm -f "$IMG_CONFIG_TMPFILE"
 
 # ---------------------------------------------------------------------------
 # 2. Unused font files

@@ -151,6 +151,7 @@ grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 
 # subscribe, addEventListener, setInterval, AppState) catch these patterns more reliably.
 
 # AppState.addEventListener without remove
+# Skip module-level singletons and class constructors — they intentionally persist for app lifetime
 echo ""
 echo "--- AppState.addEventListener Without Cleanup ---"
 grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 'AppState' "$DIR" 2>/dev/null \
@@ -158,8 +159,19 @@ grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 
   | while IFS= read -r file; do
       if grep -q 'AppState\.addEventListener\|AppState\.addListener' "$file" \
          && ! grep -q '\.remove()\|removeEventListener' "$file"; then
+        # Only flag files that use useEffect (React component/hook context)
+        # Module-level listeners and class constructor listeners are singletons — no cleanup needed
+        if ! grep -q 'useEffect' "$file"; then
+          continue
+        fi
         grep -n 'AppState\.addEventListener\|AppState\.addListener' "$file" | while IFS= read -r match; do
           lineno=$(echo "$match" | cut -d: -f1)
+          # Skip if the line is inside a class constructor or module-level scope
+          # Check if there's a class/constructor context above this line
+          preceding=$(sed -n "1,${lineno}p" "$file" 2>/dev/null)
+          if echo "$preceding" | grep -q 'class .*{' && echo "$preceding" | grep -q 'constructor('; then
+            continue
+          fi
           echo "$file:$lineno — [ERROR] AppState.addEventListener without cleanup → Store subscription and call subscription.remove() in useEffect cleanup"
           ISSUES=$((ISSUES + 1))
         done

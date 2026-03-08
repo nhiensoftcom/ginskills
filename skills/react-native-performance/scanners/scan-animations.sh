@@ -7,6 +7,8 @@ echo "Animation Performance Scanner"
 echo "================================"
 
 # Animated.timing/spring/decay without useNativeDriver: true
+# Note: useNativeDriver only supports opacity and transform. Properties like backgroundColor,
+# width, height, margin, padding, borderRadius REQUIRE useNativeDriver: false — not a bug.
 echo ""
 echo "--- Animated Without useNativeDriver ---"
 grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
@@ -15,10 +17,18 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
   | while IFS= read -r line; do
       file=$(echo "$line" | cut -d: -f1)
       lineno=$(echo "$line" | cut -d: -f2)
+      # Look at broader context (20 lines) to check what property the animated value drives
       context=$(sed -n "${lineno},$((lineno + 8))p" "$file" 2>/dev/null)
+      broad_context=$(sed -n "1,$((lineno + 30))p" "$file" 2>/dev/null | tail -50)
       if ! echo "$context" | grep -q 'useNativeDriver:\s*true'; then
         if echo "$context" | grep -q 'useNativeDriver:\s*false'; then
-          echo "$file:$lineno — [ERROR] Animated.timing/spring with useNativeDriver: false → Change to useNativeDriver: true; only opacity and transform are supported on native thread"
+          # Check if the animated value is used for non-native-driver-compatible properties
+          # (backgroundColor, width, height, margin*, padding*, border*, left, top, right, bottom, flex)
+          if echo "$broad_context" | grep -qE 'backgroundColor|width:\s*anim|height:\s*anim|marginTop|marginBottom|marginLeft|marginRight|paddingTop|paddingBottom|paddingLeft|paddingRight|borderRadius|borderWidth|left:\s*anim|top:\s*anim|right:\s*anim|bottom:\s*anim|interpolate.*backgroundColor|interpolate.*color'; then
+            echo "$file:$lineno — [INFO] Animated with useNativeDriver: false (justified: animates layout/color property) → Consider react-native-reanimated for smoother layout animations on UI thread"
+          else
+            echo "$file:$lineno — [ERROR] Animated.timing/spring with useNativeDriver: false → Change to useNativeDriver: true; only opacity and transform are supported on native thread"
+          fi
         else
           echo "$file:$lineno — [ERROR] Animated.timing/spring missing useNativeDriver → Add useNativeDriver: true to run animation on UI thread and avoid JS thread jank"
         fi

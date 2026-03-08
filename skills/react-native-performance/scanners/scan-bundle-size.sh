@@ -91,7 +91,7 @@ find "$DIR" \( -name "index.ts" -o -name "index.tsx" -o -name "index.js" -o -nam
   -not -path "*/node_modules/*" 2>/dev/null \
   | while IFS= read -r file; do
       total=$(wc -l < "$file" | tr -d ' ')
-      exports=$(grep -c '^export \({\|default\|\*\|type\)' "$file" 2>/dev/null || echo 0)
+      exports=$(grep -c '^export \({\|default\|\*\|type\)' "$file" 2>/dev/null || true)
       if [ "$total" -gt 0 ] && [ "$exports" -gt 5 ]; then
         ratio=$((exports * 100 / total))
         if [ "$ratio" -gt 70 ]; then

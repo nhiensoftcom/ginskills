@@ -6,14 +6,15 @@ ISSUES=0
 echo "Memory Leak Scanner"
 echo "================================"
 
-# addEventListener without removeEventListener in useEffect
+# addEventListener without removeEventListener / subscription.remove() in useEffect
 echo ""
 echo "--- addEventListener Without Cleanup ---"
 grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 'addEventListener' "$DIR" 2>/dev/null \
   | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
   | while IFS= read -r file; do
       if grep -q 'useEffect' "$file"; then
-        if ! grep -q 'removeEventListener' "$file"; then
+        # Accept removeEventListener (DOM) or .remove() (React Native subscription API)
+        if ! grep -q 'removeEventListener\|\.remove()' "$file"; then
           grep -n 'addEventListener' "$file" | while IFS= read -r match; do
             lineno=$(echo "$match" | cut -d: -f1)
             echo "$file:$lineno — [ERROR] addEventListener without removeEventListener in cleanup → Return cleanup function calling removeEventListener"
@@ -38,13 +39,14 @@ grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 
       fi
     done
 
-# setInterval without clearInterval
+# setInterval without clearInterval (only inside React components/hooks, not plain class services)
 echo ""
 echo "--- setInterval Without clearInterval ---"
 grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 'setInterval(' "$DIR" 2>/dev/null \
   | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
   | while IFS= read -r file; do
-      if ! grep -q 'clearInterval' "$file"; then
+      # Only flag files that also use useEffect — plain service classes manage their own timers
+      if grep -q 'useEffect' "$file" && ! grep -q 'clearInterval' "$file"; then
         grep -n 'setInterval(' "$file" | while IFS= read -r match; do
           lineno=$(echo "$match" | cut -d: -f1)
           echo "$file:$lineno — [ERROR] setInterval without clearInterval → Return () => clearInterval(id) from useEffect"
@@ -83,17 +85,24 @@ grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 
       fi
     done
 
-# fetch in useEffect without AbortController
+# fetch inside useEffect without AbortController
+# Strategy: look for files where fetch() appears on a line that is preceded by useEffect
+# within a 30-line window. This avoids flagging fetch() calls in standalone utility functions.
 echo ""
 echo "--- fetch Without AbortController ---"
 grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 'useEffect' "$DIR" 2>/dev/null \
   | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
   | while IFS= read -r file; do
-      if grep -q 'fetch(' "$file" && ! grep -q 'AbortController\|signal\|abortController' "$file"; then
-        grep -n 'fetch(' "$file" | while IFS= read -r match; do
-          lineno=$(echo "$match" | cut -d: -f1)
-          echo "$file:$lineno — [WARN] fetch() in useEffect without AbortController → Add AbortController and return cleanup calling abort()"
-          ISSUES=$((ISSUES + 1))
+      if ! grep -q 'AbortController\|signal\|abortController' "$file"; then
+        # Walk each useEffect block: check the 30 lines after it for a fetch() call
+        grep -n 'useEffect' "$file" | while IFS= read -r ueline; do
+          uelineno=$(echo "$ueline" | cut -d: -f1)
+          endlineno=$((uelineno + 30))
+          block=$(sed -n "${uelineno},${endlineno}p" "$file" 2>/dev/null)
+          if echo "$block" | grep -q 'fetch('; then
+            echo "$file:$uelineno — [WARN] fetch() in useEffect without AbortController → Add AbortController and return cleanup calling abort()"
+            ISSUES=$((ISSUES + 1))
+          fi
         done
       fi
     done
@@ -139,7 +148,7 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" '
       lineno=$(echo "$line" | cut -d: -f2)
       context=$(sed -n "${lineno},$((lineno + 20))p" "$file" 2>/dev/null)
       if echo "$context" | grep -q 'subscribe\|addListener\|addEventListener\|setInterval\|setTimeout'; then
-        if ! echo "$context" | grep -q 'return\s*()'; then
+        if ! echo "$context" | grep -qE 'return[[:space:]]*\(\)'; then
           echo "$file:$lineno — [WARN] useEffect with subscription/listener may be missing cleanup return → Add return () => { ... } cleanup"
           ISSUES=$((ISSUES + 1))
         fi

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Image Performance Scanner
 DIR="${1:-./src}"
-ISSUES=0
+TMPFILE=$(mktemp)
 
 echo "Image Performance Scanner"
 echo "================================"
@@ -17,7 +17,7 @@ grep -rn --include="*.tsx" --include="*.jsx" '<Image ' "$DIR" 2>/dev/null \
       context=$(sed -n "${lineno},$((lineno + 6))p" "$file" 2>/dev/null)
       if ! echo "$context" | grep -q 'width\|height\|style='; then
         echo "$file:$lineno — [ERROR] <Image> without explicit width/height → Provide dimensions or a style with width/height to prevent layout recalculation"
-        ISSUES=$((ISSUES + 1))
+        echo 1 >> "$TMPFILE"
       fi
     done
 
@@ -32,7 +32,7 @@ grep -rn --include="*.tsx" --include="*.jsx" 'source={{ uri:' "$DIR" 2>/dev/null
       context=$(sed -n "${lineno},$((lineno + 8))p" "$file" 2>/dev/null)
       if ! echo "$context" | grep -q 'defaultSource\|placeholder\|blurhash\|blurHash\|LoadingIndicator\|fallback'; then
         echo "$file:$lineno — [WARN] Network image without placeholder/defaultSource → Add defaultSource or blurhash to avoid blank flicker while loading"
-        ISSUES=$((ISSUES + 1))
+        echo 1 >> "$TMPFILE"
       fi
     done
 
@@ -47,7 +47,7 @@ grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 
         grep -n '<Image ' "$file" | while IFS= read -r match; do
           lineno=$(echo "$match" | cut -d: -f1)
           echo "$file:$lineno — [WARN] expo-image used without cachePolicy → Set cachePolicy='memory-disk' for best performance"
-          ISSUES=$((ISSUES + 1))
+          echo 1 >> "$TMPFILE"
         done
       fi
     done
@@ -70,12 +70,12 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
           size=$(wc -c < "$full_img" 2>/dev/null || echo 0)
           if [ "$size" -gt 200000 ]; then
             echo "$file:$lineno — [WARN] Large local image ($(( size / 1024 ))KB) require() → Compress image, use @2x/@3x variants, or switch to WebP"
-            ISSUES=$((ISSUES + 1))
+            echo 1 >> "$TMPFILE"
           fi
         fi
       fi
       echo "$file:$lineno — [INFO] Local image via require() → Ensure image is optimized (compressed, correct resolution); use WebP format"
-      ISSUES=$((ISSUES + 1))
+      echo 1 >> "$TMPFILE"
     done
 
 # <Image> without resizeMode/contentFit
@@ -89,7 +89,7 @@ grep -rn --include="*.tsx" --include="*.jsx" '<Image ' "$DIR" 2>/dev/null \
       context=$(sed -n "${lineno},$((lineno + 6))p" "$file" 2>/dev/null)
       if ! echo "$context" | grep -q 'resizeMode\|contentFit'; then
         echo "$file:$lineno — [INFO] <Image> without resizeMode/contentFit → Specify resizeMode to avoid unexpected stretching or cropping"
-        ISSUES=$((ISSUES + 1))
+        echo 1 >> "$TMPFILE"
       fi
     done
 

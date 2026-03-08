@@ -6,16 +6,24 @@ ISSUES=0
 echo "Build Configuration Scanner"
 echo "================================"
 
-# Hermes not enabled in android/app/build.gradle
+# Hermes not enabled in android/app/build.gradle or android/gradle.properties
 echo ""
 echo "--- Hermes Not Enabled in Android Build ---"
 find "${DIR%/src}" \( -path "*/android/app/build.gradle" -o -path "*/android/app/build.gradle.kts" \) \
   -not -path "*/node_modules/*" 2>/dev/null \
   | while IFS= read -r file; do
-      if ! grep -q 'hermesEnabled.*=.*true\|hermes_enabled.*=.*true\|enableHermes.*=.*true' "$file"; then
-        echo "$file:1 — [ERROR] Hermes not enabled in android/app/build.gradle → Add hermesEnabled = true in the android { defaultConfig {} } block; Hermes significantly reduces startup time and memory usage"
-        ISSUES=$((ISSUES + 1))
+      # Check for hermesEnabled in the build.gradle file itself
+      if grep -q 'hermesEnabled.*=.*true\|hermes_enabled.*=.*true\|enableHermes.*=.*true' "$file"; then
+        continue
       fi
+      # Also check gradle.properties in the android directory (modern RN/Expo pattern)
+      android_dir=$(dirname "$file")
+      gradle_props="$android_dir/../gradle.properties"
+      if [ -f "$gradle_props" ] && grep -q 'hermesEnabled\s*=\s*true' "$gradle_props"; then
+        continue
+      fi
+      echo "$file:1 — [ERROR] Hermes not enabled in android/app/build.gradle → Add hermesEnabled = true in the android { defaultConfig {} } block or android/gradle.properties; Hermes significantly reduces startup time and memory usage"
+      ISSUES=$((ISSUES + 1))
     done
 
 # Missing ProGuard/R8 rules

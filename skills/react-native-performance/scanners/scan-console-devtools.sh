@@ -16,8 +16,11 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
   | while IFS= read -r line; do
       file=$(echo "$line" | cut -d: -f1)
       lineno=$(echo "$line" | cut -d: -f2)
-      prev_line=$(sed -n "$((lineno > 1 ? lineno - 1 : 1))p" "$file" 2>/dev/null)
-      if ! echo "$prev_line" | grep -q '__DEV__\|if.*DEV'; then
+      # Check a 10-line context window above the call for any __DEV__ reference,
+      # catching both direct `if (__DEV__)` guards and indirect patterns like
+      # `const DEBUG = __DEV__` followed by `if (!DEBUG) return`.
+      context=$(sed -n "$((lineno > 10 ? lineno - 10 : 1)),$((lineno - 1))p" "$file" 2>/dev/null)
+      if ! echo "$context" | grep -q '__DEV__\|if.*DEV'; then
         echo "$file:$lineno — [WARN] console.log without __DEV__ guard → Wrap with if (__DEV__) or use babel-plugin-transform-remove-console"
         ISSUES=$((ISSUES + 1))
       fi
@@ -33,8 +36,9 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
   | while IFS= read -r line; do
       file=$(echo "$line" | cut -d: -f1)
       lineno=$(echo "$line" | cut -d: -f2)
-      prev_line=$(sed -n "$((lineno > 1 ? lineno - 1 : 1))p" "$file" 2>/dev/null)
-      if ! echo "$prev_line" | grep -q '__DEV__\|if.*DEV'; then
+      # Check a 10-line context window above the call for any __DEV__ reference.
+      context=$(sed -n "$((lineno > 10 ? lineno - 10 : 1)),$((lineno - 1))p" "$file" 2>/dev/null)
+      if ! echo "$context" | grep -q '__DEV__\|if.*DEV'; then
         echo "$file:$lineno — [WARN] console.warn without __DEV__ guard → Wrap with if (__DEV__) or suppress in production logger"
         ISSUES=$((ISSUES + 1))
       fi
@@ -149,10 +153,21 @@ echo "--- Hardcoded localhost / Dev URLs ---"
 grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
   'localhost\|127\.0\.0\.1\|192\.168\.' "$DIR" 2>/dev/null \
   | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
-  | grep -v '__DEV__\|//.*localhost\|config\|\.env' \
+  | grep -v '//.*localhost\|\.env' \
   | while IFS= read -r line; do
-      file_loc=$(echo "$line" | cut -d: -f1,2)
-      echo "$file_loc — [ERROR] Hardcoded local/dev URL → Use environment variables (process.env / Config) for API base URLs"
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      # Skip lines that themselves reference __DEV__ (e.g. `if (!__DEV__ || ...localhost...)`)
+      # Also skip lines that are inside a __DEV__-guarded block by scanning 10 lines of context.
+      match_line=$(echo "$line" | cut -d: -f3-)
+      if echo "$match_line" | grep -q '__DEV__'; then
+        continue
+      fi
+      context=$(sed -n "$((lineno > 10 ? lineno - 10 : 1)),$((lineno - 1))p" "$file" 2>/dev/null)
+      if echo "$context" | grep -q '__DEV__'; then
+        continue
+      fi
+      echo "$file:$lineno — [ERROR] Hardcoded local/dev URL → Use environment variables (process.env / Config) for API base URLs"
       ISSUES=$((ISSUES + 1))
     done
 

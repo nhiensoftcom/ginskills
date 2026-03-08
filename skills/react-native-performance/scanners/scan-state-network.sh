@@ -134,8 +134,8 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       file=$(echo "$line" | cut -d: -f1)
       lineno=$(echo "$line" | cut -d: -f2)
       context=$(sed -n "${lineno},$((lineno + 10))p" "$file" 2>/dev/null)
-      field_count=$(echo "$context" | grep -c '^\s*[a-zA-Z]\+:' 2>/dev/null || echo 0)
-      if [ "$field_count" -gt 4 ]; then
+      field_count=$(echo "$context" | grep -c '^[[:space:]]*[a-zA-Z][a-zA-Z0-9_]*:' 2>/dev/null || echo 0)
+      if [ "$field_count" -gt 4 ] 2>/dev/null; then
         echo "$file:$lineno — [WARN] useState with large object ($field_count+ fields) → Use useReducer for complex state or split into multiple useState calls"
         ISSUES=$((ISSUES + 1))
       fi

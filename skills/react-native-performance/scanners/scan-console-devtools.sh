@@ -8,8 +8,18 @@ echo "================================"
 
 # console.log without __DEV__ guard
 # Escalates to ERROR when on gesture/animation hot paths (60fps concern)
+# Projects using a custom logger (e.g. appLog) should prefer that over raw console.log
 echo ""
 echo "--- console.log Without __DEV__ Guard ---"
+
+# Auto-detect custom logger: check if the project has an appLog/logger utility
+CUSTOM_LOGGER=""
+CUSTOM_LOGGER_IMPORT=""
+if grep -rql --include="*.ts" --include="*.tsx" 'export const appLog' "$DIR" 2>/dev/null; then
+  CUSTOM_LOGGER="appLog"
+  CUSTOM_LOGGER_IMPORT='import { appLog } from "@/shared/utils/logger"'
+fi
+
 grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
   'console\.log(' "$DIR" 2>/dev/null \
   | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
@@ -28,10 +38,22 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
          ! echo "$file_context" | grep -q '= __DEV__'; then
         # Check if this console.log is on a gesture/animation hot path (runs every frame)
         hot_path_context=$(sed -n "$((lineno > 20 ? lineno - 20 : 1)),${lineno}p" "$file" 2>/dev/null)
+        is_worklet=false
+        if echo "$hot_path_context" | grep -q '"worklet"\|'\''worklet'\'''; then
+          is_worklet=true
+        fi
         if echo "$hot_path_context" | grep -qE 'onUpdate|onActive|Pan\.|onMove|onScroll|onGestureEvent|Gesture\.|worklet|runOnJS|requestAnimationFrame|\.addListener'; then
-          echo "$file:$lineno — [ERROR] console.log on gesture/animation hot path (runs every frame at 60fps) → Remove or wrap with __DEV__; serialization on hot paths causes jank"
+          if [ "$is_worklet" = true ]; then
+            echo "$file:$lineno — [ERROR] console.log in Reanimated worklet (runs on UI thread every frame) → Wrap with if (__DEV__) console.log(...); appLog cannot run in worklets"
+          else
+            echo "$file:$lineno — [ERROR] console.log on gesture/animation hot path (runs every frame at 60fps) → Remove or replace with ${CUSTOM_LOGGER:-__DEV__ guard}; serialization on hot paths causes jank"
+          fi
         else
-          echo "$file:$lineno — [WARN] console.log without __DEV__ guard → Wrap with if (__DEV__) or use babel-plugin-transform-remove-console"
+          if [ -n "$CUSTOM_LOGGER" ]; then
+            echo "$file:$lineno — [WARN] raw console.log instead of project logger → Replace with $CUSTOM_LOGGER.debug(...) which is dev-only by default"
+          else
+            echo "$file:$lineno — [WARN] console.log without __DEV__ guard → Wrap with if (__DEV__) or use babel-plugin-transform-remove-console"
+          fi
         fi
         ISSUES=$((ISSUES + 1))
       fi
@@ -54,7 +76,11 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       file_context=$(sed -n "1,$((lineno - 1))p" "$file" 2>/dev/null)
       if ! echo "$context" | grep -q '__DEV__\|if.*DEV' && \
          ! echo "$file_context" | grep -q '= __DEV__'; then
-        echo "$file:$lineno — [WARN] console.warn without __DEV__ guard → Wrap with if (__DEV__) or suppress in production logger"
+        if [ -n "$CUSTOM_LOGGER" ]; then
+          echo "$file:$lineno — [WARN] raw console.warn instead of project logger → Replace with $CUSTOM_LOGGER.warn(...) which is dev-only by default"
+        else
+          echo "$file:$lineno — [WARN] console.warn without __DEV__ guard → Wrap with if (__DEV__) or suppress in production logger"
+        fi
         ISSUES=$((ISSUES + 1))
       fi
     done
@@ -68,7 +94,11 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
   | grep -v '__DEV__\|Sentry\|crashlytics\|bugsnag' \
   | while IFS= read -r line; do
       file_loc=$(echo "$line" | cut -d: -f1,2)
-      echo "$file_loc — [INFO] console.error in production code → Use a crash reporting SDK (Sentry/Crashlytics) instead of console.error"
+      if [ -n "$CUSTOM_LOGGER" ]; then
+        echo "$file_loc — [INFO] raw console.error → Replace with $CUSTOM_LOGGER.error(...) or use a crash reporting SDK (Sentry/Crashlytics)"
+      else
+        echo "$file_loc — [INFO] console.error in production code → Use a crash reporting SDK (Sentry/Crashlytics) instead of console.error"
+      fi
       ISSUES=$((ISSUES + 1))
     done
 
@@ -80,7 +110,11 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
   | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
   | while IFS= read -r line; do
       file_loc=$(echo "$line" | cut -d: -f1,2)
-      echo "$file_loc — [WARN] console.info/debug in production code → Remove or guard with if (__DEV__)"
+      if [ -n "$CUSTOM_LOGGER" ]; then
+        echo "$file_loc — [WARN] raw console.info/debug → Replace with $CUSTOM_LOGGER.debug(...) which is dev-only by default"
+      else
+        echo "$file_loc — [WARN] console.info/debug in production code → Remove or guard with if (__DEV__)"
+      fi
       ISSUES=$((ISSUES + 1))
     done
 
@@ -147,6 +181,7 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
     done
 
 # Production-critical logic inside __DEV__ blocks (anti-pattern)
+# Skip __DEV__ blocks that only contain console.log (this is the correct pattern for worklet code)
 echo ""
 echo "--- Production Logic Inside __DEV__ Block ---"
 grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
@@ -156,6 +191,11 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       file=$(echo "$line" | cut -d: -f1)
       lineno=$(echo "$line" | cut -d: -f2)
       context=$(sed -n "${lineno},$((lineno + 10))p" "$file" 2>/dev/null)
+      # Skip if the __DEV__ block only wraps console.log/warn/error (that's the correct pattern)
+      match_line=$(sed -n "${lineno}p" "$file" 2>/dev/null)
+      if echo "$match_line" | grep -q 'console\.\(log\|warn\|error\|debug\|info\)'; then
+        continue
+      fi
       if echo "$context" | grep -q 'navigate\|dispatch\|setState\|fetch(\|api\.'; then
         echo "$file:$lineno — [WARN] Production-critical logic inside __DEV__ block → State changes/navigation inside __DEV__ blocks will not run in production; this may be a bug"
         ISSUES=$((ISSUES + 1))

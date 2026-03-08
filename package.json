@@ -23,12 +23,9 @@
     "gen-readme": "node scripts/gen-readme.mjs",
     "check-upstream": "node scripts/check-upstream.mjs",
     "deploy": "npx wrangler pages deploy landing --project-name ginskill --branch main",
-    "gen-readme": "node scripts/gen-readme.mjs",
-    "preversion": "node scripts/gen-readme.mjs",
-    "postversion": "npm publish && git push && git push --tags && npm run deploy",
-    "release": "npm version patch",
-    "release:minor": "npm version minor",
-    "release:major": "npm version major"
+    "release": "git add -A && git diff-index --quiet HEAD || git commit -m 'chore: pre-release' && node scripts/gen-readme.mjs && npm version patch -m 'chore: release v%s' && npm publish && git push && git push --tags && npm run deploy",
+    "release:minor": "git add -A && git diff-index --quiet HEAD || git commit -m 'chore: pre-release' && node scripts/gen-readme.mjs && npm version minor -m 'chore: release v%s' && npm publish && git push && git push --tags && npm run deploy",
+    "release:major": "git add -A && git diff-index --quiet HEAD || git commit -m 'chore: pre-release' && node scripts/gen-readme.mjs && npm version major -m 'chore: release v%s' && npm publish && git push && git push --tags && npm run deploy"
   },
   "bin": {
     "gin-skills": "bin/cli.js"

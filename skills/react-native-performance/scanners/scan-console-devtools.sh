@@ -169,5 +169,72 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       ISSUES=$((ISSUES + 1))
     done
 
+# Redux DevTools middleware in production
+echo ""
+echo "--- Redux DevTools Middleware Without __DEV__ Guard ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'composeWithDevTools\|redux-devtools-extension\|DevTools\.instrument\|reduxDevtools' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      context=$(sed -n "$((lineno > 3 ? lineno - 3 : 1)),$((lineno + 3))p" "$file" 2>/dev/null)
+      if ! echo "$context" | grep -q '__DEV__'; then
+        echo "$file:$lineno — [ERROR] Redux DevTools middleware without __DEV__ guard → DevTools add significant overhead; wrap with if (__DEV__) to exclude from production builds"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
+# Performance.mark/measure without __DEV__ guard
+echo ""
+echo "--- performance.mark/measure Without __DEV__ Guard ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'performance\.mark(\|performance\.measure(' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      context=$(sed -n "$((lineno > 3 ? lineno - 3 : 1)),$((lineno + 1))p" "$file" 2>/dev/null)
+      if ! echo "$context" | grep -q '__DEV__'; then
+        echo "$file:$lineno — [WARN] performance.mark/measure without __DEV__ guard → Performance timing APIs add overhead in production; wrap with if (__DEV__)"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
+# Sentry debug mode enabled in production
+echo ""
+echo "--- Sentry debug: true Without __DEV__ Guard ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'Sentry\.init(' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      context=$(sed -n "${lineno},$((lineno + 10))p" "$file" 2>/dev/null)
+      if echo "$context" | grep -q 'debug:\s*true'; then
+        if ! echo "$context" | grep -q '__DEV__'; then
+          echo "$file:$lineno — [ERROR] Sentry initialized with debug: true without __DEV__ guard → debug mode logs all events to console and slows production; use debug: __DEV__"
+          ISSUES=$((ISSUES + 1))
+        fi
+      fi
+    done
+
+# react-native-flipper import without __DEV__ guard
+echo ""
+echo "--- react-native-flipper Import Without __DEV__ Guard ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  "from 'react-native-flipper'\|require('react-native-flipper')\|from \"react-native-flipper\"\|require(\"react-native-flipper\")" \
+  "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      context=$(sed -n "$((lineno > 5 ? lineno - 5 : 1)),$((lineno + 2))p" "$file" 2>/dev/null)
+      if ! echo "$context" | grep -q '__DEV__'; then
+        echo "$file:$lineno — [ERROR] react-native-flipper imported without __DEV__ guard → Flipper is a debug tool; guard with if (__DEV__) or use dynamic require to exclude from production bundle"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
 echo ""
 echo "Console & DevTools scan complete."

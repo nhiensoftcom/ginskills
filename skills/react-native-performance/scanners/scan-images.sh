@@ -148,5 +148,62 @@ grep -rn --include="*.tsx" --include="*.jsx" '<ImageBackground' "$DIR" 2>/dev/nu
       ISSUES=$((ISSUES + 1))
     done
 
+# Image.getSize() called inside render
+echo ""
+echo "--- Image.getSize() Called Inside Render ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'Image\.getSize(' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      context=$(sed -n "$((lineno > 5 ? lineno - 5 : 1)),$((lineno + 2))p" "$file" 2>/dev/null)
+      if ! echo "$context" | grep -q 'useEffect\|useCallback\|useMemo'; then
+        echo "$file:$lineno — [WARN] Image.getSize() outside useEffect → Calling Image.getSize() at render time triggers async work on every render; move into useEffect or useCallback"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
+# PNG used for photos (should be JPEG/WebP)
+echo ""
+echo "--- PNG Used for Photos (Consider JPEG/WebP) ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  "require('.*\(photo\|image\|img\|banner\|hero\|cover\|background\|bg\).*\.png')\|require(\".*\(photo\|image\|img\|banner\|hero\|cover\|background\|bg\).*\.png\")\|uri:.*\.png" \
+  "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      echo "$file_loc — [INFO] PNG used for photographic/large image → PNG is lossless; use JPEG (photos) or WebP (both) for significantly smaller file sizes"
+      ISSUES=$((ISSUES + 1))
+    done
+
+# Image source as inline object source={{ uri }} (new ref each render)
+echo ""
+echo "--- Image source={{ uri }} Inline Object (New Ref Each Render) ---"
+grep -rn --include="*.tsx" --include="*.jsx" \
+  'source={{\s*uri:' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      context=$(sed -n "$((lineno > 3 ? lineno - 3 : 1)),$((lineno + 1))p" "$file" 2>/dev/null)
+      if ! echo "$context" | grep -q 'useMemo\|useCallback\|const.*=.*{.*uri'; then
+        echo "$file:$lineno — [WARN] Inline source={{ uri }} object creates a new reference on every render → Extract to a useMemo or variable outside JSX to allow image cache reuse"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
+# Very large image dimensions referenced in source (>2000px hint via URL)
+echo ""
+echo "--- Potentially Very Large Remote Image Dimensions ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'uri:.*[?&]\(w\|width\|h\|height\)=[2-9][0-9]\{3,\}\|uri:.*\/[2-9][0-9]\{3,\}x[0-9]' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      echo "$file_loc — [WARN] Remote image URL with very large dimensions (>2000px) → Request appropriately sized images using CDN params (e.g., ?w=800); oversized images waste memory"
+      ISSUES=$((ISSUES + 1))
+    done
+
 echo ""
 echo "Image scan complete."

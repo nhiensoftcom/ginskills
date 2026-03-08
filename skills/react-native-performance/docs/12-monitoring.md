@@ -733,6 +733,161 @@ Store these numbers as CI artifacts and compare against the base branch. Fail th
 
 Use `danger-js` to read the Reassure output JSON and the bundle size diff, then post a formatted Markdown table as a PR comment automatically.
 
+### CI Performance Gates
+
+Performance gates are hard failure conditions in CI that block a PR from merging when a metric crosses a defined budget. They prevent gradual regressions from reaching production unnoticed.
+
+**Gate checklist:**
+
+| Metric | Tool | Fail threshold |
+|---|---|---|
+| Gzipped JS bundle size | `wc -c` + shell arithmetic | > base + 10 KB |
+| P95 cold start (TTI) | Flashlight / Detox + logcat | > 2000 ms |
+| Reassure mean render time | Reassure | > 10% regression vs base |
+| Flashlight Performance Score | Flashlight | < 75 / 100 |
+| Frozen frame rate | Sentry / Flashlight | > 1% of frames |
+
+**GitHub Actions performance gate workflow:**
+
+```yaml
+# .github/workflows/performance.yml
+name: Performance Gates
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  bundle-size:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - run: yarn install --frozen-lockfile
+
+      - name: Build JS bundle
+        run: |
+          npx react-native bundle \
+            --platform ios \
+            --dev false \
+            --entry-file index.js \
+            --bundle-output /tmp/main.jsbundle \
+            --sourcemap-output /tmp/main.map
+
+      - name: Check bundle size budget
+        run: |
+          GZIP_SIZE=$(gzip -c /tmp/main.jsbundle | wc -c)
+          echo "Gzipped bundle: ${GZIP_SIZE} bytes"
+
+          # Fetch base branch bundle size from CI artifacts
+          BASE_SIZE=${{ vars.BUNDLE_SIZE_BASELINE_BYTES }}
+          BUDGET_BYTES=10240   # 10 KB growth budget
+
+          if [ "$GZIP_SIZE" -gt "$((BASE_SIZE + BUDGET_BYTES))" ]; then
+            echo "FAIL: Bundle grew by more than 10 KB over baseline."
+            echo "Baseline: ${BASE_SIZE} | Current: ${GZIP_SIZE}"
+            exit 1
+          fi
+
+          echo "PASS: Bundle size within budget."
+
+      - name: Update baseline artifact
+        if: github.ref == 'refs/heads/main'
+        run: echo $GZIP_SIZE > bundle-size.txt
+        # Upload to GitHub Actions cache or artifact storage
+
+  reassure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: yarn install --frozen-lockfile
+
+      - name: Run Reassure benchmarks
+        run: yarn reassure
+
+      - name: Post Reassure results to PR
+        uses: callstack/reassure-action@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  flashlight-android:
+    runs-on: ubuntu-latest
+    # Requires a connected Android device or emulator (e.g., via Genycloud)
+    steps:
+      - uses: actions/checkout@v4
+      - run: yarn install --frozen-lockfile
+
+      - name: Build Android release APK
+        run: |
+          cd android
+          ./gradlew assembleRelease
+
+      - name: Run Flashlight performance test
+        run: |
+          npx @perf-tools/flashlight measure \
+            --bundleId com.myapp \
+            --testCommand "maestro test flows/feed_scroll.yaml" \
+            --resultsFilePath /tmp/flashlight.json
+
+      - name: Enforce Flashlight score threshold
+        run: |
+          SCORE=$(node -e "const r=require('/tmp/flashlight.json'); console.log(r.score)")
+          echo "Flashlight score: $SCORE"
+          if [ "$SCORE" -lt 75 ]; then
+            echo "FAIL: Flashlight score $SCORE is below the 75-point threshold."
+            exit 1
+          fi
+          echo "PASS: Score within budget."
+
+      - name: Upload Flashlight HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: flashlight-report
+          path: /tmp/flashlight.json
+```
+
+**Danger.js bundle + Reassure composite comment:**
+
+```ts
+// dangerfile.ts
+import { danger, warn, fail, markdown } from 'danger';
+import * as fs from 'fs';
+
+// Bundle size gate
+const BUNDLE_BUDGET_KB = 10;
+const baselineKB = Number(process.env.BUNDLE_BASELINE_KB ?? 0);
+const currentKB = Number(process.env.BUNDLE_CURRENT_KB ?? 0);
+const diffKB = currentKB - baselineKB;
+
+if (diffKB > BUNDLE_BUDGET_KB) {
+  fail(`JS bundle grew by **${diffKB.toFixed(1)} KB** (budget: ${BUNDLE_BUDGET_KB} KB).`);
+} else if (diffKB > 0) {
+  warn(`JS bundle grew by ${diffKB.toFixed(1)} KB.`);
+}
+
+// Reassure gate — fail if any component regresses > 10% mean render time
+if (fs.existsSync('.reassure/output.json')) {
+  const reassure = JSON.parse(fs.readFileSync('.reassure/output.json', 'utf8'));
+  const regressions = reassure.significant?.filter(
+    (r: { meanDurationDelta: number }) => r.meanDurationDelta > 10,
+  );
+  if (regressions?.length) {
+    fail(
+      `Reassure detected ${regressions.length} render time regression(s) > 10%:\n` +
+        regressions.map((r: { name: string; meanDurationDelta: number }) =>
+          `- \`${r.name}\`: +${r.meanDurationDelta.toFixed(1)}%`,
+        ).join('\n'),
+    );
+  }
+}
+```
+
 ---
 
 ## 7. Custom Performance Markers

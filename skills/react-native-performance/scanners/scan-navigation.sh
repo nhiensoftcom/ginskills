@@ -142,5 +142,73 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       fi
     done
 
+# Navigator created inside component (should be at module level)
+echo ""
+echo "--- Navigator Created Inside Component ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'create.*Navigator(' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      open_braces=$(sed -n "1,$((lineno - 1))p" "$file" 2>/dev/null | tr -cd '{' | wc -c | tr -d ' ')
+      close_braces=$(sed -n "1,$((lineno - 1))p" "$file" 2>/dev/null | tr -cd '}' | wc -c | tr -d ' ')
+      depth=$((open_braces - close_braces))
+      if [ "$depth" -gt 0 ]; then
+        echo "$file:$lineno — [ERROR] Navigator created inside a function/component body → Move createXxxNavigator() calls to module scope; recreating navigators on render resets navigation state"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
+# navigation.navigate with large params objects
+echo ""
+echo "--- navigation.navigate With Inline Object Params ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'navigation\.navigate(.*{' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      context=$(sed -n "${lineno}p" "$file" 2>/dev/null)
+      param_count=$(echo "$context" | grep -oE '[a-zA-Z]+:' | wc -l | tr -d ' ')
+      if [ "$param_count" -gt 3 ]; then
+        echo "$file:$lineno — [WARN] navigation.navigate with large inline params object ($param_count keys) → Large param objects are serialized/deserialized on each navigation; pass an ID and fetch data in the target screen"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
+# Missing gestureEnabled configuration
+echo ""
+echo "--- Screen Without gestureEnabled Configuration ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  '<Stack\.Screen\|<NativeStack\.Screen' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      context=$(sed -n "${lineno},$((lineno + 8))p" "$file" 2>/dev/null)
+      if ! echo "$context" | grep -q 'gestureEnabled\|gestureDirection'; then
+        echo "$file:$lineno — [INFO] Stack.Screen without gestureEnabled → Explicitly set gestureEnabled: false on modal or onboarding screens to prevent accidental swipe-back dismissal"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
+# Tab.Screen without lazy prop
+echo ""
+echo "--- Tab.Screen Without lazy Prop ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  '<Tab\.Screen\|<BottomTab\.Screen\|<MaterialTopTab\.Screen' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      context=$(sed -n "${lineno},$((lineno + 5))p" "$file" 2>/dev/null)
+      parent_context=$(sed -n "$((lineno > 20 ? lineno - 20 : 1)),$((lineno - 1))p" "$file" 2>/dev/null)
+      if ! echo "$context" | grep -q 'lazy' && ! echo "$parent_context" | grep -q 'lazy.*true\|lazy: true'; then
+        echo "$file:$lineno — [WARN] Tab.Screen without lazy prop → Tab screens render eagerly by default; set lazy={true} in screenOptions to defer rendering until the tab is visited"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
 echo ""
 echo "Navigation scan complete."

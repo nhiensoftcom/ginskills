@@ -589,7 +589,7 @@ Nesting a `FlatList` inside a `ScrollView` disables virtualization on the inner 
 
 ---
 
-## 7. Complex Virtualization Patterns
+## 4. Complex Virtualization Patterns
 
 ### Grid Layouts with Variable Row Heights
 
@@ -772,7 +772,7 @@ const numColumns = Dimensions.get('window').width >= 600 ? 3 : 2;
 
 ---
 
-## 4. Image Optimization
+## 5. Image Optimization
 
 ### Library Comparison
 
@@ -854,7 +854,7 @@ await Image.prefetch(['https://cdn.example.com/next-page-image.jpg']);
 
 ---
 
-## 5. Component Architecture for Performance
+## 6. Component Architecture for Performance
 
 ### Decompose Large Components
 
@@ -934,7 +934,7 @@ const FeedSection = () => (
 
 ---
 
-## 6. Style Performance
+## 7. Style Performance
 
 ### StyleSheet.create vs Inline Styles
 

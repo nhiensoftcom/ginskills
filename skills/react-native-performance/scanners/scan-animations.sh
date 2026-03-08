@@ -171,5 +171,69 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       fi
     done
 
+# ScrollView without scrollEventThrottle prop
+echo ""
+echo "--- ScrollView Without scrollEventThrottle ---"
+grep -rn --include="*.tsx" --include="*.jsx" \
+  '<ScrollView' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      context=$(sed -n "${lineno},$((lineno + 8))p" "$file" 2>/dev/null)
+      if echo "$context" | grep -q 'onScroll' && ! echo "$context" | grep -q 'scrollEventThrottle'; then
+        echo "$file:$lineno — [WARN] ScrollView with onScroll but no scrollEventThrottle → Without scrollEventThrottle the onScroll fires on every frame; set scrollEventThrottle={16} to limit to 60fps"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
+# PanResponder created inside render (should be useMemo/useRef)
+echo ""
+echo "--- PanResponder Created Inside Render ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'PanResponder\.create(' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      context=$(sed -n "$((lineno > 5 ? lineno - 5 : 1)),$((lineno + 2))p" "$file" 2>/dev/null)
+      if ! echo "$context" | grep -q 'useMemo\|useRef\|useCallback\|useEffect'; then
+        echo "$file:$lineno — [ERROR] PanResponder.create() outside useMemo/useRef → PanResponder recreated on every render; wrap with useMemo(() => PanResponder.create(...), []) or store in useRef"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
+# Animated.Value created inside render (should be useRef)
+echo ""
+echo "--- Animated.Value Created Inside Render ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'new Animated\.Value(' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      context=$(sed -n "$((lineno > 5 ? lineno - 5 : 1)),$((lineno + 1))p" "$file" 2>/dev/null)
+      if ! echo "$context" | grep -q 'useRef\|useMemo\|useState\|useSharedValue'; then
+        echo "$file:$lineno — [ERROR] new Animated.Value() outside useRef/useState → Creates a new Animated.Value on every render, losing animation state; use useRef(new Animated.Value(0)) or useSharedValue(0)"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
+# interpolate() with extreme ranges (precision loss)
+echo ""
+echo "--- interpolate() With Extreme Input/Output Ranges ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  '\.interpolate(' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file=$(echo "$line" | cut -d: -f1)
+      lineno=$(echo "$line" | cut -d: -f2)
+      context=$(sed -n "${lineno},$((lineno + 8))p" "$file" 2>/dev/null)
+      if echo "$context" | grep -qE '[0-9]{5,}'; then
+        echo "$file:$lineno — [WARN] interpolate() with very large numeric range → Extreme ranges (>10000) can cause floating-point precision loss in animations; normalize to a 0-1 range and scale in outputRange"
+        ISSUES=$((ISSUES + 1))
+      fi
+    done
+
 echo ""
 echo "Animation scan complete."

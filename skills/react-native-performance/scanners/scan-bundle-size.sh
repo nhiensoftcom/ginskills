@@ -153,5 +153,57 @@ grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
       ISSUES=$((ISSUES + 1))
     done
 
+# import * as for utility libraries (prevents tree shaking)
+echo ""
+echo "--- Wildcard import * as (Prevents Tree-shaking) ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  'import \* as ' "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | grep -v "from 'react'\|from \"react\"\|from 'react-native'\|from \"react-native\"" \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      echo "$file_loc — [WARN] Wildcard namespace import (import * as) → Prevents tree-shaking; use named imports to allow bundler to eliminate unused exports"
+      ISSUES=$((ISSUES + 1))
+    done
+
+# Polyfill imports (babel-polyfill, core-js full)
+echo ""
+echo "--- Polyfill Imports ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  "from '@babel/polyfill'\|from \"@babel/polyfill\"\|require('@babel/polyfill')\|require(\"@babel/polyfill\")\|from 'babel-polyfill'\|from \"babel-polyfill\"\|from 'core-js'\|from \"core-js\"\|require('core-js')\|require(\"core-js\")" \
+  "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      echo "$file_loc — [ERROR] Full polyfill import (babel-polyfill/core-js) adds hundreds of KB → Hermes covers modern JS; remove polyfills or use targeted core-js/stable imports"
+      ISSUES=$((ISSUES + 1))
+    done
+
+# Large JSON imports (i18n translation files loaded upfront)
+echo ""
+echo "--- Large JSON Import (i18n/translation files) ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  "require('.*\.\(json\)')\|require(\".*\.\(json\)\")\|from '.*\(translations\|i18n\|locales\|locale\).*\.json'\|from \".*\(translations\|i18n\|locales\|locale\).*\.json\"" \
+  "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      echo "$file_loc — [WARN] Static JSON translation file imported upfront → Use dynamic import() to load locale files on demand; only load the active locale at startup"
+      ISSUES=$((ISSUES + 1))
+    done
+
+# Unused @react-native-community packages
+echo ""
+echo "--- @react-native-community Package Imports ---"
+grep -rn --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" \
+  "from '@react-native-community/" "$DIR" 2>/dev/null \
+  | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
+  | while IFS= read -r line; do
+      file_loc=$(echo "$line" | cut -d: -f1,2)
+      pkg=$(echo "$line" | grep -oE "@react-native-community/[a-zA-Z0-9_-]+" | head -1)
+      echo "$file_loc — [INFO] @react-native-community package ($pkg) → Verify this package is still actively maintained; many have been superseded by React Native core or better alternatives"
+      ISSUES=$((ISSUES + 1))
+    done
+
 echo ""
 echo "Bundle size scan complete."

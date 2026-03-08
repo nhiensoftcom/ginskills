@@ -56,17 +56,17 @@ grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 
     done
 
 # setTimeout inside useEffect without clearTimeout
-# Only flags when setTimeout appears within 25 lines after a useEffect call (scoped to effect body)
+# Only flags when setTimeout appears within 5 lines after a useEffect call (scoped to effect body)
 echo ""
 echo "--- setTimeout Without clearTimeout ---"
 grep -rln --include="*.tsx" --include="*.ts" --include="*.jsx" --include="*.js" 'setTimeout(' "$DIR" 2>/dev/null \
   | grep -v node_modules | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' \
   | while IFS= read -r file; do
       if ! grep -q 'clearTimeout' "$file"; then
-        # Only flag setTimeout that appears within a useEffect body (within 25 lines after useEffect)
+        # Only flag setTimeout that appears within a useEffect body (within 5 lines after useEffect)
         grep -n 'useEffect(' "$file" | while IFS= read -r ueline; do
           uelineno=$(echo "$ueline" | cut -d: -f1)
-          endlineno=$((uelineno + 25))
+          endlineno=$((uelineno + 5))
           block=$(sed -n "${uelineno},${endlineno}p" "$file" 2>/dev/null)
           if echo "$block" | grep -q 'setTimeout('; then
             # Report the useEffect line so the developer sees where to add cleanup

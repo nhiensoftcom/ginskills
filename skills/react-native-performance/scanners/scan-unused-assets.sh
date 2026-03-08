@@ -231,7 +231,14 @@ find "$DIR" \
 echo ""
 echo "--- Duplicate Assets (Same Name, Different Extensions) ---"
 
-DUP_TMPFILE=$(mktemp)
+# Strategy: for each asset, record "dir/base<TAB>extension" where base has density
+# suffixes stripped and extension is the file format (e.g. png, svg).
+# A true duplicate exists only when the same dir/base has MORE THAN ONE distinct
+# extension (e.g. icon.png and icon.svg). Pure density variants like icon@2x.png
+# and icon@3x.png share the same extension and are NOT flagged.
+
+DUP_TMPFILE=$(mktemp)         # "dir/base<TAB>ext" lines (one per file)
+DUP_BASES_TMPFILE=$(mktemp)   # dir/base entries that have >1 distinct extension
 
 find "$DIR" \
   \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" \
@@ -240,26 +247,34 @@ find "$DIR" \
   2>/dev/null \
   | while IFS= read -r asset; do
       filename=$(basename "$asset")
-      # Normalise: strip @2x/@3x suffix then extension
+      # Strip density suffix (@2x/@3x) then get the bare extension of the original file
+      ext="${filename##*.}"
       base=$(strip_suffix "$filename")
       dir=$(dirname "$asset")
-      echo "${dir}/${base}"
+      printf '%s\t%s\n' "${dir}/${base}" "$ext"
     done \
-  | sort \
-  | uniq -d \
+  | sort -u \
   > "$DUP_TMPFILE"
 
+# Find dir/base keys that appear with more than one distinct extension
+awk -F'\t' '{print $1}' "$DUP_TMPFILE" \
+  | sort \
+  | uniq -d \
+  > "$DUP_BASES_TMPFILE"
+
 while IFS= read -r dup_base; do
-  # Find the actual duplicates
+  # Collect the distinct extensions for this base
+  exts=$(grep -F "${dup_base}	" "$DUP_TMPFILE" | awk -F'\t' '{print $2}' | sort -u | tr '\n' ',' | sed 's/,$//')
+  # Find the actual files on disk
   matches=$(find "$(dirname "$dup_base")" -maxdepth 1 \
     \( -name "$(basename "$dup_base").*" \
        -o -name "$(basename "$dup_base")@*" \) \
     2>/dev/null | head -10 | tr '\n' ' ')
-  echo "${dup_base}:1 — [INFO] Duplicate asset base name '$(basename "$dup_base")' exists with multiple extensions: ${matches}→ Consolidate to one format (prefer WebP); the unused variant wastes storage"
+  echo "${dup_base}:1 — [INFO] Duplicate asset base name '$(basename "$dup_base")' exists with multiple extensions (${exts}): ${matches}→ Consolidate to one format (prefer WebP); the unused variant wastes storage"
   echo 1 >> "$TMPFILE"
-done < "$DUP_TMPFILE"
+done < "$DUP_BASES_TMPFILE"
 
-rm -f "$DUP_TMPFILE"
+rm -f "$DUP_TMPFILE" "$DUP_BASES_TMPFILE"
 
 # ---------------------------------------------------------------------------
 # Cleanup and summary

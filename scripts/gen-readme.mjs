@@ -33,7 +33,8 @@ const AGENT_STYLES = [
   { color: "var(--blue)", bg: "var(--blue-dim)" },
 ]
 
-function parseFrontmatter(content) {
+function parseFrontmatter(rawContent) {
+  const content = rawContent.replace(/\r\n/g, "\n")
   const match = content.match(/^---\n([\s\S]*?)\n---/)
   if (!match) return null
 

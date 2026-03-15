@@ -1,0 +1,14 @@
+# Ensure shell scripts always have LF line endings (required for bash on Linux/macOS)
+*.sh text eol=lf
+
+# Markdown and text files use LF
+*.md text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.ts text eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.ico binary

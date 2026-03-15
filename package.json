@@ -23,9 +23,9 @@
     "gen-readme": "node scripts/gen-readme.mjs",
     "check-upstream": "node scripts/check-upstream.mjs",
     "deploy": "npx wrangler pages deploy landing --project-name ginskill --branch main",
-    "release": "node scripts/gen-readme.mjs && git add -A && git diff-index --quiet HEAD || git commit -m \"chore: pre-release\" && npm version patch -m 'chore: release v%s' && npm publish && git push && git push --tags && npm run deploy",
-    "release:minor": "node scripts/gen-readme.mjs && git add -A && git diff-index --quiet HEAD || git commit -m \"chore: pre-release\" && npm version minor -m 'chore: release v%s' && npm publish && git push && git push --tags && npm run deploy",
-    "release:major": "node scripts/gen-readme.mjs && git add -A && git diff-index --quiet HEAD || git commit -m \"chore: pre-release\" && npm version major -m 'chore: release v%s' && npm publish && git push && git push --tags && npm run deploy"
+    "release": "node scripts/gen-readme.mjs && git add -A && git diff-index --quiet HEAD || git commit -m \"chore: pre-release\" && npm version patch && npm publish && git push && git push --tags && npm run deploy",
+    "release:minor": "node scripts/gen-readme.mjs && git add -A && git diff-index --quiet HEAD || git commit -m \"chore: pre-release\" && npm version minor && npm publish && git push && git push --tags && npm run deploy",
+    "release:major": "node scripts/gen-readme.mjs && git add -A && git diff-index --quiet HEAD || git commit -m \"chore: pre-release\" && npm version major && npm publish && git push && git push --tags && npm run deploy"
   },
   "bin": {
     "gin-skills": "bin/cli.js"
